@@ -1,6 +1,6 @@
 """
-Calendar App FastAPI Server
-Provides calendar management and AI chat assistant using Ollama.
+Aion — A.U.R.A Calendar & Scheduling Server
+Provides calendar management, Clingo ASP solving, and AI chat assistant using Ollama.
 """
 
 from fastapi import FastAPI, HTTPException
@@ -23,7 +23,7 @@ import calendar
 # Import the Clingo solver
 from agent.solver import ScheduleSolver
 
-app = FastAPI(title="Calendar App Server")
+app = FastAPI(title="Aion — A.U.R.A Calendar Server")
 
 app.add_middleware(
     CORSMiddleware,
