@@ -1,0 +1,1 @@
+Calendar app with AI assistant for scheduling, conflict detection, and natural language event management.

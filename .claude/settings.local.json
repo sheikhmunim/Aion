@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"D:\\\\+Masters AI\\\\Jarvis\\\\CalendarApp\")",
+      "Bash(dir:*)",
+      "Bash(\"calander_venv\\\\Scripts\\\\pip.exe\" list)",
+      "Bash(findstr:*)",
+      "Bash(\"calander_venv\\\\Scripts\\\\python.exe\":*)",
+      "Bash(\"calander_venv\\\\Scripts\\\\python.exe\" -c \"import clingo; print\\(''Clingo imported successfully''\\); print\\(clingo.__version__\\)\")",
+      "Bash(\"D:\\\\+Masters AI\\\\Jarvis\\\\CalendarApp\\\\calander_venv\\\\Scripts\\\\pip.exe\" show clingo)",
+      "Bash(\"D:\\\\+Masters AI\\\\Jarvis\\\\CalendarApp\\\\calander_venv\\\\Scripts\\\\python.exe\" -m pip install clingo)",
+      "Bash(\"D:\\\\+Masters AI\\\\Jarvis\\\\CalendarApp\\\\calander_venv\\\\Scripts\\\\python.exe\" -m pip:*)",
+      "Bash(\"D:\\\\+Masters AI\\\\Jarvis\\\\CalendarApp\\\\calander_venv\\\\Scripts\\\\python.exe\" -c \"import clingo; print\\(''Clingo version:'', clingo.__version__\\)\")",
+      "Bash(\"D:\\\\+Masters AI\\\\Jarvis\\\\CalendarApp\\\\calander_venv\\\\Scripts\\\\python.exe\":*)",
+      "Bash(\"D:\\\\+Masters AI\\\\Jarvis\\\\CalendarApp\\\\calander_venv\\\\Scripts\\\\python.exe\" -c \"import sys; sys.path.insert\\(0, ''D:\\\\+Masters AI\\\\Jarvis\\\\CalendarApp''\\); from calendar_server import schedule_solver; print\\(''Server imports OK''\\); print\\(''Solver:'', schedule_solver\\)\")",
+      "Bash(timeout:*)",
+      "Bash(curl:*)",
+      "Bash(\"D:\\\\A.U.R.A\\\\Aion\\\\calander_venv\\\\Scripts\\\\python.exe\" -c \"import fastapi; import uvicorn; import httpx; import pydantic; import clingo; print\\(''All imports OK''\\)\")",
+      "Bash(\"D:\\\\A.U.R.A\\\\Aion\\\\calander_venv\\\\Scripts\\\\python.exe\":*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
