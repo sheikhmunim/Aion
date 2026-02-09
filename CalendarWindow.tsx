@@ -280,7 +280,7 @@ export const CalendarWindow: React.FC = () => {
 
     // Get the script path
     const scriptResult = await ipcRenderer.invoke('resolve-workflow-script', {
-      workflowFolder: 'CalendarApp',
+      workflowFolder: 'Aion',
       scriptName: 'calendar_server.py'
     });
 

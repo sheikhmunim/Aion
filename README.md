@@ -1,6 +1,8 @@
-# Calendar App with AI Assistant
+# Aion — A.U.R.A Calendar & Scheduling Module
 
-An Outlook-style calendar application with month/week views, event management, and an AI chat assistant powered by Ollama.
+**Part of A.U.R.A (Autonomous Unified Reasoning Assistant)**
+
+An Outlook-style calendar application with month/week views, event management, AI chat assistant (Ollama), and constraint-based scheduling (Clingo ASP).
 
 ![Calendar App](CalendarWindow.png)
 
@@ -71,7 +73,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 ### Step 1: Clone/Navigate to the App
 
 ```bash
-cd C:\Users\Munim\ContextUI\default\workflows\examples\CalendarApp
+cd D:\A.U.R.A\Aion
 ```
 
 ### Step 2: Create Python Virtual Environment
@@ -139,16 +141,7 @@ OLLAMA_MODEL = "qwen2.5:3b"  # Change this
 
 ## Running the App
 
-### Option 1: Through ContextUI (Recommended)
-
-1. Open ContextUI application
-2. Find "CalendarApp" in workflows/examples
-3. Click to open
-4. Select your Python venv from dropdown
-5. Click "Start Server"
-6. Use the calendar!
-
-### Option 2: Standalone (Command Line)
+### Option 1: Command Line
 
 **Terminal 1 - Start Ollama:**
 ```bash
@@ -157,7 +150,7 @@ ollama serve
 
 **Terminal 2 - Start Calendar Server:**
 ```bash
-cd C:\Users\Munim\ContextUI\default\workflows\examples\CalendarApp
+cd D:\A.U.R.A\Aion
 
 # Activate venv (Windows)
 venv\Scripts\activate.bat
@@ -300,16 +293,20 @@ curl -X DELETE http://127.0.0.1:8767/events/EVENT_ID
 ## File Structure
 
 ```
-CalendarApp/
-├── CalendarWindow.tsx      # React frontend component
-├── CalendarWindow.meta.json # Icon/color metadata
-├── CalendarWindow.png      # Preview image
-├── calendar_server.py      # FastAPI backend server
-├── requirements.txt        # Python dependencies
-├── description.txt         # App description
-├── README.md              # This file
+Aion/
+├── agent/
+│   ├── __init__.py            # Exports ASPModel + ScheduleSolver
+│   ├── asp_model.py           # ASP program generator (standalone R&D)
+│   └── solver.py              # Clingo solver interface
+├── CalendarWindow.tsx         # React frontend component
+├── CalendarWindow.meta.json   # Icon/color metadata
+├── CalendarWindow.png         # Preview image
+├── calendar_server.py         # FastAPI backend server
+├── requirements.txt           # Python dependencies
+├── description.txt            # App description
+├── README.md                  # This file
 └── data/
-    └── events.json        # Persistent event storage
+    └── events.json            # Persistent event storage
 ```
 
 ---
@@ -427,7 +424,7 @@ python calendar_server.py 8768
 
 ## License
 
-This project is part of ContextUI examples.
+Aion is part of the **A.U.R.A** (Autonomous Unified Reasoning Assistant) project.
 
 ---
 
@@ -438,7 +435,7 @@ This project is part of ContextUI examples.
 ollama pull qwen2.5:3b
 
 # 2. Setup Python environment
-cd CalendarApp
+cd D:\A.U.R.A\Aion
 python -m venv venv
 venv\Scripts\activate.bat
 pip install -r requirements.txt
@@ -449,6 +446,6 @@ ollama serve
 # 4. Start Calendar Server (Terminal 2)
 python calendar_server.py 8767
 
-# 5. Open in browser or use via ContextUI
+# 5. Open in browser or connect via A.U.R.A
 # API available at http://127.0.0.1:8767
 ```
