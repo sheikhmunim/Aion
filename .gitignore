@@ -51,6 +51,9 @@ data/events.json
 .env.local
 .env.*.local
 
+# ASP scratch files (personal R&D)
+*.lp
+
 # Temporary files
 *.tmp
 *.temp
