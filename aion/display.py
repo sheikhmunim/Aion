@@ -17,7 +17,7 @@ console = Console()
 def print_banner() -> None:
     console.print(Panel(
         "[bold cyan]Aion[/] — AI Calendar Agent\n"
-        "Type [bold]help[/] for commands, [bold]quit[/] to exit",
+        "Type [bold]help[/] for commands, [bold]preferences[/] to configure, [bold]quit[/] to exit",
         border_style="cyan",
     ))
 
@@ -45,6 +45,7 @@ def print_help() -> None:
     t.add_row("Best time", '"best time for a 2h study session"')
     t.add_row("Login", '"login" — connect Google Calendar')
     t.add_row("Logout", '"logout" — disconnect Google Calendar')
+    t.add_row("Preferences", '"preferences" — blocked times & defaults')
     t.add_row("Quit", '"quit" or "exit"')
     console.print(t)
 
@@ -108,6 +109,61 @@ def print_info(msg: str) -> None:
 
 def confirm(message: str) -> bool:
     return Confirm.ask(f"  {message}")
+
+
+def print_preferences(prefs: dict) -> None:
+    """Display current preferences as a Rich table."""
+    blocked = prefs.get("blocked_slots", [])
+    default_pref = prefs.get("default_time_pref")
+
+    ALL_DAYS = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
+    WEEKDAYS = {"monday", "tuesday", "wednesday", "thursday", "friday"}
+    WEEKENDS = {"saturday", "sunday"}
+
+    if not blocked and not default_pref:
+        console.print("  No preferences set yet.")
+        return
+
+    if blocked:
+        t = Table(title="Preferences", show_header=True, border_style="dim")
+        t.add_column("#", style="dim", justify="right")
+        t.add_column("Block", style="bold cyan")
+        t.add_column("Days")
+        t.add_column("Time")
+        t.add_column("Until")
+
+        for i, slot in enumerate(blocked, 1):
+            days_set = set(slot.get("days", []))
+            if days_set == ALL_DAYS:
+                days_label = "Every day"
+            elif days_set == WEEKDAYS:
+                days_label = "Weekdays"
+            elif days_set == WEEKENDS:
+                days_label = "Weekends"
+            else:
+                days_label = ", ".join(d.capitalize()[:3] for d in slot["days"])
+
+            until = slot.get("until")
+            if until:
+                try:
+                    until_label = datetime.strptime(until, "%Y-%m-%d").strftime("%b %d")
+                except ValueError:
+                    until_label = until
+            else:
+                until_label = "Always"
+
+            t.add_row(
+                str(i),
+                slot.get("label", "Blocked"),
+                days_label,
+                f"{slot['start']} - {slot['end']}",
+                until_label,
+            )
+        console.print(t)
+
+    if default_pref:
+        console.print(f"\n  Default time preference: [bold]{default_pref}[/]")
+    console.print()
 
 
 def guided_fallback() -> str | None:

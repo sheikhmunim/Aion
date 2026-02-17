@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from aion import display
-from aion.config import clear_tokens, get_config, get_tokens, save_config
+from aion.config import clear_tokens, get_config, get_preferences, get_tokens, save_config, save_preferences
 from aion.google_cal import EventData, GoogleCalendar
 from aion.intent import ParsedCommand, classify
 from aion.ollama import ollama_available, reset_status
@@ -104,13 +104,16 @@ async def handle_schedule(cmd: ParsedCommand, gcal: GoogleCalendar, solver: Sche
     # Use ASP solver to find optimal slot
     display.print_info(f"Finding optimal slot for '{title}'...")
 
+    # Use user's default time preference if none specified
+    time_pref = cmd.time_pref or get_preferences().get("default_time_pref")
+
     request = {
         "activity": cmd.activity or title,
         "duration": duration,
         "date": date,
-        "prefer_morning": cmd.time_pref == "morning",
-        "prefer_afternoon": cmd.time_pref == "afternoon",
-        "prefer_evening": cmd.time_pref == "evening",
+        "prefer_morning": time_pref == "morning",
+        "prefer_afternoon": time_pref == "afternoon",
+        "prefer_evening": time_pref == "evening",
     }
     solutions = solver.find_available_slots([e.to_dict() for e in events], request)
 
@@ -118,13 +121,75 @@ async def handle_schedule(cmd: ParsedCommand, gcal: GoogleCalendar, solver: Sche
         display.print_error("No available slots found. Calendar may be full for this date.")
         return
 
-    best = solutions[0][0]
-    date_display = cmd.date_label or best["date"]
+    # Collect all candidate slots from solver
+    all_slots = [s for group in solutions for s in (group if isinstance(group, list) else [group])]
+    slot_idx = 0
 
-    if display.confirm(f"Schedule '{title}' on {date_display} at {best['time']} for {duration} min?"):
-        with console.status("Creating event..."):
-            ev = await gcal.create_event(title, best["date"], best["time"], duration)
-        display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time}")
+    while slot_idx < len(all_slots):
+        best = all_slots[slot_idx]
+        date_display = cmd.date_label or best["date"]
+
+        if display.confirm(f"Schedule '{title}' on {date_display} at {best['time']} for {duration} min?"):
+            with console.status("Creating event..."):
+                ev = await gcal.create_event(title, best["date"], best["time"], duration)
+            display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time}")
+            return
+
+        # User declined — offer alternatives
+        slot_idx += 1
+        has_more = slot_idx < len(all_slots)
+
+        console.print()
+        console.print("  What would you prefer?")
+        if has_more:
+            next_slot = all_slots[slot_idx]
+            console.print(f"    [bold]1.[/] Try next slot ({next_slot['time']})")
+        console.print(f"    [bold]2.[/] Pick a time preference (morning / afternoon / evening)")
+        console.print(f"    [bold]3.[/] Enter a specific time")
+        console.print(f"    [bold]4.[/] Cancel")
+
+        valid = ["1", "2", "3", "4"] if has_more else ["2", "3", "4"]
+        choice = Prompt.ask("  Choose", choices=valid, default=valid[0])
+
+        if choice == "4":
+            return
+
+        if choice == "1" and has_more:
+            continue  # loop will show next slot
+
+        if choice == "2":
+            pref = Prompt.ask("  Preference", choices=["morning", "afternoon", "evening"])
+            request["prefer_morning"] = pref == "morning"
+            request["prefer_afternoon"] = pref == "afternoon"
+            request["prefer_evening"] = pref == "evening"
+            new_solutions = solver.find_available_slots([e.to_dict() for e in events], request)
+            if new_solutions and not (isinstance(new_solutions[0], dict) and "error" in new_solutions[0]):
+                all_slots = [s for group in new_solutions for s in (group if isinstance(group, list) else [group])]
+                slot_idx = 0
+                continue
+            display.print_error(f"No {pref} slots available.")
+            return
+
+        if choice == "3":
+            time_str = Prompt.ask("  Enter time (e.g. 2pm, 14:00)")
+            from aion.intent import _extract_time
+            parsed_time = _extract_time(f"at {time_str}")
+            if not parsed_time:
+                display.print_error(f"Couldn't parse '{time_str}'. Try formats like 2pm, 14:00, 9:30am.")
+                return
+            conflicts = _check_conflict(events, date, parsed_time, duration)
+            if conflicts:
+                display.print_error(f"Conflict at {parsed_time} with:")
+                for c in conflicts:
+                    console.print(f"    - {c.time} — {c.title} ({c.duration} min)")
+                if not display.confirm("Schedule anyway (overlap)?"):
+                    return
+            with console.status("Creating event..."):
+                ev = await gcal.create_event(title, date, parsed_time, duration)
+            display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time}")
+            return
+
+    display.print_error("No more available slots for this date.")
 
 
 async def handle_list(cmd: ParsedCommand, gcal: GoogleCalendar) -> None:
@@ -215,12 +280,13 @@ async def handle_find_optimal(cmd: ParsedCommand, gcal: GoogleCalendar, solver: 
         events = await gcal.list_events(date)
 
     duration = cmd.duration or int(get_config().get("default_duration", 60))
+    time_pref = cmd.time_pref or get_preferences().get("default_time_pref")
     request = {
         "activity": cmd.activity or "event",
         "duration": duration,
-        "prefer_morning": cmd.time_pref == "morning",
-        "prefer_afternoon": cmd.time_pref == "afternoon",
-        "prefer_evening": cmd.time_pref == "evening",
+        "prefer_morning": time_pref == "morning",
+        "prefer_afternoon": time_pref == "afternoon",
+        "prefer_evening": time_pref == "evening",
     }
     if date:
         request["date"] = date
@@ -231,6 +297,133 @@ async def handle_find_optimal(cmd: ParsedCommand, gcal: GoogleCalendar, solver: 
         return
 
     display.print_optimal_slot(solutions[0][0])
+
+
+ALL_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday"]
+WEEKENDS = ["saturday", "sunday"]
+
+
+def handle_preferences() -> None:
+    """Interactive preferences menu."""
+    prefs = get_preferences()
+    raw_cfg = get_config().get("preferences", {})
+
+    display.print_preferences(prefs)
+
+    console.print("  What would you like to do?")
+    console.print("    [bold]1.[/] Add a blocked time slot")
+    console.print("    [bold]2.[/] Remove a blocked slot")
+    console.print("    [bold]3.[/] Change default time preference")
+    console.print("    [bold]4.[/] Back")
+    console.print()
+
+    choice = Prompt.ask("  Choose", choices=["1", "2", "3", "4"], default="4")
+
+    if choice == "4":
+        return
+
+    if choice == "1":
+        # Add a blocked slot
+        label = Prompt.ask("  Label (e.g. Lunch break)")
+
+        console.print("  Which days?")
+        console.print("    [bold]1.[/] Every day")
+        console.print("    [bold]2.[/] Weekdays (Mon-Fri)")
+        console.print("    [bold]3.[/] Weekends (Sat-Sun)")
+        console.print("    [bold]4.[/] Specific days")
+        day_choice = Prompt.ask("  Choose", choices=["1", "2", "3", "4"], default="1")
+
+        if day_choice == "1":
+            days = ALL_DAYS[:]
+        elif day_choice == "2":
+            days = WEEKDAYS[:]
+        elif day_choice == "3":
+            days = WEEKENDS[:]
+        else:
+            while True:
+                days_input = Prompt.ask("  Days (comma-separated, e.g. monday,wednesday,friday)")
+                days = [d.strip().lower() for d in days_input.split(",") if d.strip().lower() in ALL_DAYS]
+                if days:
+                    break
+                display.print_error("No valid days entered. Use full names like monday, tuesday.")
+
+        import re
+        time_pat = re.compile(r"^\d{1,2}:\d{2}$")
+
+        while True:
+            start = Prompt.ask("  Start time (e.g. 09:00)")
+            if not time_pat.match(start):
+                display.print_error("Invalid time format. Use HH:MM (e.g. 09:00).")
+                continue
+            break
+
+        while True:
+            end = Prompt.ask("  End time (e.g. 17:00)")
+            if not time_pat.match(end):
+                display.print_error("Invalid time format. Use HH:MM (e.g. 17:00).")
+                continue
+            if end <= start:
+                display.print_error(f"End time must be after {start}.")
+                continue
+            break
+
+        console.print("  How long should this block last?")
+        console.print("    [bold]1.[/] Always (permanent)")
+        console.print("    [bold]2.[/] Until a specific date")
+        until_choice = Prompt.ask("  Choose", choices=["1", "2"], default="1")
+
+        until = None
+        if until_choice == "2":
+            while True:
+                until = Prompt.ask("  Until date (YYYY-MM-DD)")
+                if not re.match(r"^\d{4}-\d{2}-\d{2}$", until):
+                    display.print_error("Invalid date format. Use YYYY-MM-DD.")
+                    continue
+                break
+
+        new_slot = {"label": label, "days": days, "start": start, "end": end, "until": until}
+
+        all_slots = raw_cfg.get("blocked_slots", [])
+        all_slots.append(new_slot)
+        raw_cfg["blocked_slots"] = all_slots
+        save_preferences(raw_cfg)
+        display.print_success(f"Added blocked slot: {label}")
+
+    elif choice == "2":
+        # Remove a blocked slot
+        blocked = prefs.get("blocked_slots", [])
+        if not blocked:
+            display.print_info("No blocked slots to remove.")
+            return
+
+        choices = [str(i) for i in range(1, len(blocked) + 1)]
+        pick = Prompt.ask("  Which slot to remove? (enter number)", choices=choices)
+        idx = int(pick) - 1
+        slot = blocked[idx]
+
+        if display.confirm(f"Remove '{slot.get('label', 'Blocked')}'?"):
+            # Remove from the raw config (which may include expired entries)
+            all_slots = raw_cfg.get("blocked_slots", [])
+            # Match by label+start+end+days to find the right one
+            all_slots = [
+                s for s in all_slots
+                if not (s.get("label") == slot.get("label") and s.get("start") == slot.get("start")
+                        and s.get("end") == slot.get("end") and s.get("days") == slot.get("days"))
+            ]
+            raw_cfg["blocked_slots"] = all_slots
+            save_preferences(raw_cfg)
+            display.print_success(f"Removed '{slot.get('label', 'Blocked')}'")
+
+    elif choice == "3":
+        # Change default time preference
+        pref = Prompt.ask("  Default time preference", choices=["morning", "afternoon", "evening", "none"])
+        raw_cfg["default_time_pref"] = None if pref == "none" else pref
+        save_preferences(raw_cfg)
+        if pref == "none":
+            display.print_success("Cleared default time preference.")
+        else:
+            display.print_success(f"Default time preference set to: {pref}")
 
 
 async def handle_input(user_input: str, gcal: GoogleCalendar | None, solver: ScheduleSolver) -> bool:
@@ -261,6 +454,10 @@ async def handle_input(user_input: str, gcal: GoogleCalendar | None, solver: Sch
         display.print_help()
         return True
 
+    if text.lower() in ("preferences", "prefs", "settings"):
+        handle_preferences()
+        return True
+
     if gcal is None:
         display.print_error("Not logged in. Run 'login' first to connect Google Calendar.")
         return True
@@ -270,6 +467,8 @@ async def handle_input(user_input: str, gcal: GoogleCalendar | None, solver: Sch
     match cmd.intent:
         case "HELP":
             display.print_help()
+        case "PREFERENCES":
+            handle_preferences()
         case "SCHEDULE":
             await handle_schedule(cmd, gcal, solver)
         case "LIST":
