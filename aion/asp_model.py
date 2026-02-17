@@ -160,6 +160,37 @@ evening(24..{self.total_slots - 1}).
         lines.append("\n#show schedule/3.")
         return "\n".join(lines)
 
+    def generate_preference_constraints(
+        self, blocked_slots: list[dict], target_date: str | None = None
+    ) -> str:
+        """Convert blocked preference slots into ASP busy facts.
+
+        If target_date is given, only generate facts for that date's weekday.
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        lines = ["\n% Blocked times from user preferences"]
+
+        for block in blocked_slots:
+            until = block.get("until")
+            if until and until < today:
+                continue
+
+            start_slot = self.time_to_slot(block["start"])
+            end_slot = self.time_to_slot(block["end"])
+
+            if target_date:
+                weekday = self.date_to_weekday(target_date)
+                if weekday not in block.get("days", []):
+                    continue
+                for slot in range(start_slot, min(end_slot, self.total_slots)):
+                    lines.append(f'busy({weekday}, {slot}, "preference").')
+            else:
+                for day in block.get("days", []):
+                    for slot in range(start_slot, min(end_slot, self.total_slots)):
+                        lines.append(f'busy({day}, {slot}, "preference").')
+
+        return "\n".join(lines)
+
     def generate_full_program(self, events: list[dict], request: dict, dates: list[str] | None = None) -> str:
         program = self.generate_base_program()
         program += self.generate_busy_constraints(events, dates)

@@ -31,6 +31,8 @@ class ParsedCommand:
 _INTENT_PATTERNS: list[tuple[str, re.Pattern, int]] = [
     ("HELP", re.compile(
         r"^(?:help|commands|what can you do|how do(?:es)? (?:this|it) work)\s*\??$", re.I), 10),
+    ("PREFERENCES", re.compile(
+        r"\b(?:preferences?|settings?|blocked?\s*(?:slots?|times?)?|configure)\b", re.I), 8),
     ("FIND_OPTIMAL", re.compile(
         r"\b(?:best\s+time|optimal|when\s+should\s+i|suggest|recommend)\b", re.I), 9),
     ("FIND_FREE", re.compile(

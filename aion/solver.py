@@ -3,6 +3,7 @@
 import clingo
 
 from aion.asp_model import ASPModel
+from aion.config import get_preferences
 
 
 class ScheduleSolver:
@@ -18,6 +19,13 @@ class ScheduleSolver:
             dates = self.model.get_week_dates()
 
         program = self.model.generate_full_program(events, request, dates)
+
+        # Inject user preference constraints
+        prefs = get_preferences()
+        blocked = prefs.get("blocked_slots", [])
+        if blocked:
+            target_date = request.get("date")
+            program += self.model.generate_preference_constraints(blocked, target_date)
         ctl = clingo.Control([f"--models={max_solutions}", "--opt-mode=optN"])
         ctl.add("base", [], program)
 
@@ -67,6 +75,22 @@ class ScheduleSolver:
                 duration = self.model.duration_to_slots(event["duration"])
                 for slot in range(start, min(start + duration, self.model.total_slots)):
                     busy_slots.add(slot)
+
+        # Also block preference slots
+        prefs = get_preferences()
+        weekday = self.model.date_to_weekday(date)
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        for block in prefs.get("blocked_slots", []):
+            until = block.get("until")
+            if until and until < today:
+                continue
+            if weekday not in block.get("days", []):
+                continue
+            start = self.model.time_to_slot(block["start"])
+            end = self.model.time_to_slot(block["end"])
+            for slot in range(start, min(end, self.model.total_slots)):
+                busy_slots.add(slot)
 
         free_slots: list[dict] = []
         current_start = None

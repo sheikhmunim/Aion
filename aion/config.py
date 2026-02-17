@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 AION_DIR = Path.home() / ".aion"
@@ -75,3 +76,29 @@ def clear_tokens() -> None:
 def reload_config() -> None:
     global _config_cache
     _config_cache = None
+
+
+def get_preferences() -> dict:
+    """Return preferences with expired blocked_slots filtered out."""
+    cfg = get_config()
+    prefs = cfg.get("preferences", {})
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    active_slots = []
+    for slot in prefs.get("blocked_slots", []):
+        until = slot.get("until")
+        if until and until < today:
+            continue
+        active_slots.append(slot)
+
+    return {
+        "blocked_slots": active_slots,
+        "default_time_pref": prefs.get("default_time_pref"),
+    }
+
+
+def save_preferences(prefs: dict) -> None:
+    """Save preferences into config (preserves other config keys)."""
+    cfg = get_config()
+    cfg["preferences"] = prefs
+    save_config(cfg)
