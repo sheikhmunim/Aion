@@ -1,1 +1,0 @@
-Aion — A.U.R.A calendar and scheduling module with AI assistant, conflict detection, Clingo ASP solver, and natural language event management.
