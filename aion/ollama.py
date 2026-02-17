@@ -18,7 +18,7 @@ def _url() -> str:
 
 
 def _model() -> str:
-    return get_config().get("ollama_model", "llama3.2")
+    return get_config().get("ollama_model", "qwen2.5:0.5b")
 
 
 def ollama_available() -> bool:

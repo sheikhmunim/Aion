@@ -43,7 +43,7 @@ def get_config() -> dict:
     cfg.setdefault("default_duration", 60)
     cfg.setdefault("timezone", "UTC")
     cfg.setdefault("ollama_url", "http://localhost:11434")
-    cfg.setdefault("ollama_model", "llama3.2")
+    cfg.setdefault("ollama_model", "qwen2.5:0.5b")
 
     _config_cache = cfg
     return cfg

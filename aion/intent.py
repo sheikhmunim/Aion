@@ -12,6 +12,7 @@ from aion.date_parser import parse_date_from_query
 class ParsedCommand:
     intent: str                        # SCHEDULE, LIST, DELETE, UPDATE, FIND_FREE, FIND_OPTIMAL, HELP, UNKNOWN
     activity: str | None = None        # "gym", "meeting with John"
+    label: str | None = None           # custom title: "called Morning Workout"
     dates: list[str] = field(default_factory=list)
     date_label: str = ""               # "tomorrow (February 18, 2026)"
     time: str | None = None            # "15:00"
@@ -19,6 +20,11 @@ class ParsedCommand:
     time_pref: str | None = None       # "morning", "afternoon", "evening"
     confidence: float = 1.0
     raw: str = ""
+
+    @property
+    def title(self) -> str | None:
+        """Event title — label if provided, otherwise activity."""
+        return self.label or self.activity
 
 
 # (intent_name, pattern, priority) — higher priority checked first
@@ -44,6 +50,7 @@ _TIME_24H = re.compile(r"\bat\s+(\d{1,2}):(\d{2})\b")
 _DURATION = re.compile(r"\b(?:for\s+)?(\d+(?:\.\d+)?)\s*[-\s]*(hours?|hrs?|h|minutes?|mins?|m)\b", re.I)
 _DURATION_SHORT = re.compile(r"\b(\d+(?:\.\d+)?)\s*(h|hr|hrs|min|mins)\b", re.I)
 _TIME_PREF = re.compile(r"\b(morning|afternoon|evening|night)\b", re.I)
+_LABEL = re.compile(r"\b(?:called|named|titled?|as)\s+[\"']?(.+?)[\"']?\s*$", re.I)
 
 
 def _extract_time(text: str) -> str | None:
@@ -80,9 +87,20 @@ def _extract_time_pref(text: str) -> str | None:
     return None
 
 
+def _extract_label(text: str) -> tuple[str | None, str]:
+    """Extract custom label and return (label, text_without_label)."""
+    m = _LABEL.search(text)
+    if m:
+        label = m.group(1).strip(" \"'")
+        cleaned = text[:m.start()].strip()
+        return label, cleaned
+    return None, text
+
+
 def _extract_activity(text: str, intent: str) -> str | None:
     """Extract the activity/event name from text by stripping known patterns."""
-    cleaned = text.strip()
+    from aion.date_parser import _fix_typos
+    cleaned = _fix_typos(text.strip())
 
     # Check for "for <activity>" pattern at end (e.g. "add event for gym")
     # Only if "for" is NOT followed by a number (which would be duration)
@@ -142,6 +160,9 @@ def regex_classify(user_input: str) -> ParsedCommand:
             confidence = 0.9
             break
 
+    # Extract label first (strip "called/named/titled/as ..." from end)
+    label, text_for_activity = _extract_label(text)
+
     # Extract entities
     date_info = parse_date_from_query(text)
     dates = date_info.get("dates", [])
@@ -149,7 +170,7 @@ def regex_classify(user_input: str) -> ParsedCommand:
     time = _extract_time(text)
     duration = _extract_duration(text)
     time_pref = _extract_time_pref(text)
-    activity = _extract_activity(text, intent) if intent in ("SCHEDULE", "DELETE", "UPDATE", "FIND_OPTIMAL") else None
+    activity = _extract_activity(text_for_activity, intent) if intent in ("SCHEDULE", "DELETE", "UPDATE", "FIND_OPTIMAL") else None
 
     if intent != "UNKNOWN" and (dates or time or activity):
         confidence = min(confidence + 0.1, 1.0)
@@ -159,6 +180,7 @@ def regex_classify(user_input: str) -> ParsedCommand:
     return ParsedCommand(
         intent=intent,
         activity=activity,
+        label=label,
         dates=dates,
         date_label=date_label,
         time=time,
@@ -170,16 +192,20 @@ def regex_classify(user_input: str) -> ParsedCommand:
 
 
 async def classify(user_input: str, events: list[dict] | None = None) -> ParsedCommand:
-    """Classify intent with Ollama fallback for low-confidence results."""
-    result = regex_classify(user_input)
-    if result.confidence >= 0.8:
-        return result
-
+    """Classify intent — LLM-first when available, regex as fallback."""
     from aion.ollama import ollama_available, ollama_classify
+
+    # Fast path: very obvious commands skip LLM entirely
+    regex_result = regex_classify(user_input)
+    if regex_result.confidence >= 1.0:
+        return regex_result
+
+    # Primary: use Ollama LLM for robust natural language understanding
     if ollama_available():
         try:
             return await ollama_classify(user_input, events)
         except Exception:
             pass
 
-    return result
+    # Fallback: regex result (works offline / without Ollama)
+    return regex_result

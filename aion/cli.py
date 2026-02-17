@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from aion import display
-from aion.config import clear_tokens, get_config, get_tokens
+from aion.config import clear_tokens, get_config, get_tokens, save_config
 from aion.google_cal import EventData, GoogleCalendar
 from aion.intent import ParsedCommand, classify
 from aion.ollama import ollama_available, reset_status
@@ -33,31 +33,79 @@ def _find_event_by_title(events: list[EventData], title: str) -> EventData | Non
     return None
 
 
+def _check_conflict(events: list[EventData], date: str, time: str, duration: int) -> list[EventData]:
+    """Check if a proposed time slot conflicts with existing events."""
+    from aion.asp_model import ASPModel
+    model = ASPModel()
+    try:
+        new_start = model.time_to_slot(time)
+    except (ValueError, IndexError):
+        return []
+    new_end = new_start + model.duration_to_slots(duration)
+
+    conflicts = []
+    for ev in events:
+        if ev.date != date:
+            continue
+        try:
+            ev_start = model.time_to_slot(ev.time)
+        except (ValueError, IndexError):
+            continue
+        ev_end = ev_start + model.duration_to_slots(ev.duration)
+        if new_start < ev_end and new_end > ev_start:
+            conflicts.append(ev)
+    return conflicts
+
+
 async def handle_schedule(cmd: ParsedCommand, gcal: GoogleCalendar, solver: ScheduleSolver) -> None:
-    if not cmd.activity:
+    if not cmd.activity and not cmd.label:
         display.print_error("What would you like to schedule? Try: schedule gym tomorrow morning")
         return
 
+    title = cmd.title  # label if set, otherwise activity
     date = cmd.dates[0] if cmd.dates else datetime.now().strftime("%Y-%m-%d")
     duration = cmd.duration or int(get_config().get("default_duration", 60))
 
-    # Explicit time — skip solver
-    if cmd.time:
-        label = cmd.date_label or date
-        if display.confirm(f"Schedule '{cmd.activity}' on {label} at {cmd.time} for {duration} min?"):
-            with console.status("Creating event..."):
-                ev = await gcal.create_event(cmd.activity, date, cmd.time, duration)
-            display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time}")
-        return
-
-    # Use ASP solver to find optimal slot
-    display.print_info(f"Finding optimal slot for '{cmd.activity}'...")
-
+    # Always fetch existing events for conflict checking
     with console.status("Fetching calendar..."):
         events = await gcal.list_events(date)
 
+    # Explicit time given — check for conflicts
+    if cmd.time:
+        conflicts = _check_conflict(events, date, cmd.time, duration)
+        if conflicts:
+            display.print_error(f"Conflict! '{cmd.time}' overlaps with:")
+            for c in conflicts:
+                console.print(f"    - {c.time} — {c.title} ({c.duration} min)")
+            console.print()
+            console.print("  What would you like to do?")
+            console.print("    [bold]1.[/] Find the next best slot (recommended)")
+            console.print("    [bold]2.[/] Schedule anyway (overlap)")
+            console.print("    [bold]3.[/] Cancel")
+
+            choice = Prompt.ask("  Choose", choices=["1", "2", "3"], default="1")
+
+            if choice == "3":
+                return
+            elif choice == "2":
+                with console.status("Creating event..."):
+                    ev = await gcal.create_event(title, date, cmd.time, duration)
+                display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time} (overlapping)")
+                return
+            # choice == "1": fall through to solver below
+        else:
+            date_display = cmd.date_label or date
+            if display.confirm(f"Schedule '{title}' on {date_display} at {cmd.time} for {duration} min?"):
+                with console.status("Creating event..."):
+                    ev = await gcal.create_event(title, date, cmd.time, duration)
+                display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time}")
+            return
+
+    # Use ASP solver to find optimal slot
+    display.print_info(f"Finding optimal slot for '{title}'...")
+
     request = {
-        "activity": cmd.activity,
+        "activity": cmd.activity or title,
         "duration": duration,
         "date": date,
         "prefer_morning": cmd.time_pref == "morning",
@@ -71,11 +119,11 @@ async def handle_schedule(cmd: ParsedCommand, gcal: GoogleCalendar, solver: Sche
         return
 
     best = solutions[0][0]
-    label = cmd.date_label or best["date"]
+    date_display = cmd.date_label or best["date"]
 
-    if display.confirm(f"Schedule '{cmd.activity}' on {label} at {best['time']} for {duration} min?"):
+    if display.confirm(f"Schedule '{title}' on {date_display} at {best['time']} for {duration} min?"):
         with console.status("Creating event..."):
-            ev = await gcal.create_event(cmd.activity, best["date"], best["time"], duration)
+            ev = await gcal.create_event(title, best["date"], best["time"], duration)
         display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time}")
 
 
@@ -251,16 +299,25 @@ async def handle_input(user_input: str, gcal: GoogleCalendar | None, solver: Sch
 
 async def async_main() -> None:
     """Async entry point."""
-    # Direct `aion login` subcommand
-    if len(sys.argv) > 1 and sys.argv[1] == "login":
-        from aion.auth import login
-        try:
-            console.print("Opening browser for Google login...")
-            await login()
-            display.print_success("Logged in! Google Calendar connected.")
-        except Exception as e:
-            display.print_error(str(e))
-        return
+    # Direct subcommands: aion login / aion setup
+    if len(sys.argv) > 1:
+        subcmd = sys.argv[1]
+        if subcmd == "login":
+            from aion.auth import login
+            try:
+                console.print("Opening browser for Google login...")
+                await login()
+                display.print_success("Logged in! Google Calendar connected.")
+            except Exception as e:
+                display.print_error(str(e))
+            return
+        elif subcmd == "setup":
+            from aion.setup import setup
+            if setup():
+                display.print_success("Smart command understanding is ready!")
+            else:
+                display.print_error("Setup failed. You can still use basic commands.")
+            return
 
     display.print_banner()
 
@@ -277,6 +334,25 @@ async def async_main() -> None:
     reset_status()
     ollama_ok = ollama_available()
     ollama_model = get_config().get("ollama_model", "") if ollama_ok else ""
+
+    # First run: offer to set up Ollama for smart understanding
+    if not ollama_ok and not get_config().get("ollama_setup_declined"):
+        from rich.prompt import Confirm as RichConfirm
+        console.print()
+        if RichConfirm.ask("  Enable smart command understanding? (auto-installs Ollama, ~500MB download)", default=True):
+            from aion.setup import setup
+            if setup():
+                reset_status()
+                ollama_ok = ollama_available()
+                ollama_model = get_config().get("ollama_model", "")
+                display.print_success("Smart understanding enabled!")
+            else:
+                display.print_error("Setup failed. Using basic mode.")
+        else:
+            cfg = get_config()
+            cfg["ollama_setup_declined"] = True
+            save_config(cfg)
+
     display.print_status(gcal_ok, ollama_ok, ollama_model)
 
     solver = ScheduleSolver()
