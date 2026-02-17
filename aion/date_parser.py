@@ -31,12 +31,30 @@ WEEKDAY_NAMES: dict[str, int] = {
 }
 
 
+_TYPOS: dict[str, str] = {
+    "tommorow": "tomorrow", "tomorow": "tomorrow", "tmrw": "tomorrow", "tmr": "tomorrow",
+    "tomorroow": "tomorrow", "tomorrw": "tomorrow", "2morrow": "tomorrow",
+    "yesteday": "yesterday", "ysterday": "yesterday", "yesterdy": "yesterday",
+    "wenesday": "wednesday", "wensday": "wednesday", "wedensday": "wednesday",
+    "thurday": "thursday", "thrusday": "thursday", "tusday": "tuesday", "tueday": "tuesday",
+    "firday": "friday", "saterday": "saturday", "satruday": "saturday",
+    "satuday": "saturday", "munday": "monday", "mondy": "monday",
+    "sundya": "sunday", "suday": "sunday",
+}
+
+_TYPO_PATTERN = re.compile(r"\b(" + "|".join(re.escape(k) for k in _TYPOS) + r")\b", re.I)
+
+
+def _fix_typos(text: str) -> str:
+    return _TYPO_PATTERN.sub(lambda m: _TYPOS[m.group(1).lower()], text)
+
+
 def parse_date_from_query(message: str) -> dict:
     """Parse date references from user message.
 
     Returns: {type: 'date'|'month'|'week'|None, dates: [...], label: str}
     """
-    message_lower = message.lower()
+    message_lower = _fix_typos(message.lower())
     today = datetime.now()
     result: dict = {"type": None, "dates": [], "label": ""}
 
