@@ -51,6 +51,16 @@ async def ollama_classify(user_input: str, events: list[dict] | None = None) -> 
 
     prompt = f"""You are a calendar command parser. Extract intent and entities from this command.
 
+Intents:
+- LIST = user wants to SEE/VIEW events ("what tomorrow?", "what I have today", "show my calendar")
+- SCHEDULE = user wants to CREATE/ADD a new event ("schedule gym at 3pm", "add meeting tomorrow")
+- DELETE = user wants to REMOVE an event ("cancel gym", "delete meeting")
+- UPDATE = user wants to CHANGE an event ("move gym to 3pm", "reschedule meeting")
+- FIND_FREE = user wants to see AVAILABLE/FREE time slots ("when am I free?")
+- FIND_OPTIMAL = user wants a SUGGESTED time ("best time for study?")
+
+If the user is ASKING about their schedule (what, when, anything), that is LIST, not SCHEDULE.
+
 User command: "{user_input}"
 
 Current events:

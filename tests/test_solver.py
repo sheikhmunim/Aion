@@ -1,27 +1,32 @@
 """Tests for the ASP/Clingo schedule solver."""
 
+from unittest.mock import patch
+
 from aion.solver import ScheduleSolver
 
+_EMPTY_PREFS = {"blocked_slots": [], "default_time_pref": None}
 
+
+@patch("aion.solver.get_preferences", return_value=_EMPTY_PREFS)
 class TestFindFreeSlots:
     def setup_method(self):
         self.solver = ScheduleSolver()
 
-    def test_empty_calendar(self):
+    def test_empty_calendar(self, _mock):
         slots = self.solver.find_free_slots([], "2026-02-18")
         assert len(slots) == 1
         assert slots[0]["start"] == "06:00"
         assert slots[0]["end"] == "22:00"
         assert slots[0]["duration_mins"] == 960  # 16 hours
 
-    def test_one_event(self):
+    def test_one_event(self, _mock):
         events = [{"date": "2026-02-18", "time": "10:00", "duration": 60}]
         slots = self.solver.find_free_slots(events, "2026-02-18")
         assert len(slots) >= 2
         assert slots[0]["start"] == "06:00"
         assert slots[0]["end"] == "10:00"
 
-    def test_min_duration_filter(self):
+    def test_min_duration_filter(self, _mock):
         events = [
             {"date": "2026-02-18", "time": "10:00", "duration": 30},
             {"date": "2026-02-18", "time": "11:00", "duration": 30},
@@ -30,25 +35,26 @@ class TestFindFreeSlots:
         for s in slots:
             assert s["duration_mins"] >= 60
 
-    def test_ignores_other_dates(self):
+    def test_ignores_other_dates(self, _mock):
         events = [{"date": "2026-02-19", "time": "10:00", "duration": 60}]
         slots = self.solver.find_free_slots(events, "2026-02-18")
         assert len(slots) == 1
         assert slots[0]["duration_mins"] == 960
 
 
+@patch("aion.solver.get_preferences", return_value=_EMPTY_PREFS)
 class TestFindAvailableSlots:
     def setup_method(self):
         self.solver = ScheduleSolver()
 
-    def test_schedule_on_empty_day(self):
+    def test_schedule_on_empty_day(self, _mock):
         request = {"activity": "gym", "duration": 60, "date": "2026-02-18"}
         solutions = self.solver.find_available_slots([], request)
         assert len(solutions) >= 1
         assert solutions[0][0]["activity"] == "gym"
         assert solutions[0][0]["date"] == "2026-02-18"
 
-    def test_avoids_conflict(self):
+    def test_avoids_conflict(self, _mock):
         events = [{"date": "2026-02-18", "time": "09:00", "duration": 60}]
         request = {"activity": "meeting", "duration": 60, "date": "2026-02-18"}
         solutions = self.solver.find_available_slots(events, request)
@@ -60,7 +66,7 @@ class TestFindAvailableSlots:
                 event_end = event_start + 2  # 60 min = 2 slots
                 assert slot_start < event_start or slot_start >= event_end
 
-    def test_prefer_morning(self):
+    def test_prefer_morning(self, _mock):
         request = {
             "activity": "gym",
             "duration": 60,
