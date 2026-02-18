@@ -2,12 +2,34 @@
 name = "aion-agent"
 version = "0.1.0"
 description = "AI calendar scheduling agent for Google Calendar"
+readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.10"
+authors = [
+    {name = "Sheikh Abdul Munim"},
+]
+keywords = ["calendar", "scheduling", "google-calendar", "cli", "agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Scheduling",
+]
 dependencies = [
     "clingo>=5.6.0",
     "httpx>=0.25.0",
     "rich>=13.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/sheikhmunim/Aion"
+Repository = "https://github.com/sheikhmunim/Aion"
+Issues = "https://github.com/sheikhmunim/Aion/issues"
 
 [project.scripts]
 aion = "aion.cli:main"
