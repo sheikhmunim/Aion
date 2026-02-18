@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 
-from aion.config import get_config, get_tokens, save_tokens
+from aion.config import get_config, get_now, get_tokens, save_tokens
 
 BASE_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -117,15 +118,16 @@ class GoogleCalendar:
             "maxResults": "100",
             "timeZone": tz,
         }
+        tz_info = ZoneInfo(tz)
         if date:
-            # Pad ±1 day in UTC to cover all timezones, then filter locally
-            d = datetime.strptime(date, "%Y-%m-%d")
-            params["timeMin"] = (d - timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
-            params["timeMax"] = (d + timedelta(days=1)).strftime("%Y-%m-%dT23:59:59Z")
+            d = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=tz_info)
+            params["timeMin"] = d.strftime("%Y-%m-%dT00:00:00%z")
+            params["timeMax"] = (d + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00%z")
         else:
-            now = datetime.now()
-            params["timeMin"] = (now - timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
-            params["timeMax"] = (now + timedelta(days=8)).strftime("%Y-%m-%dT23:59:59Z")
+            now = get_now()
+            day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            params["timeMin"] = day_start.strftime("%Y-%m-%dT00:00:00%z")
+            params["timeMax"] = (day_start + timedelta(days=8)).strftime("%Y-%m-%dT00:00:00%z")
 
         async with httpx.AsyncClient() as client:
             resp = await client.get(BASE_URL, params=params, headers=self._headers())
@@ -140,6 +142,31 @@ class GoogleCalendar:
             events = [ev for ev in events if ev.date == date]
 
         return events
+
+    async def list_events_range(self, start_date: str, end_date: str) -> list[EventData]:
+        """List events across a date range (inclusive)."""
+        tz = get_config().get("timezone", "UTC")
+        tz_info = ZoneInfo(tz)
+        d_start = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=tz_info)
+        d_end = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=tz_info)
+        params: dict[str, str] = {
+            "singleEvents": "true",
+            "orderBy": "startTime",
+            "maxResults": "250",
+            "timeZone": tz,
+            "timeMin": d_start.strftime("%Y-%m-%dT00:00:00%z"),
+            "timeMax": (d_end + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00%z"),
+        }
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(BASE_URL, params=params, headers=self._headers())
+            if await self._refresh_if_needed(resp):
+                resp = await client.get(BASE_URL, params=params, headers=self._headers())
+            resp.raise_for_status()
+
+        events = [ev for item in resp.json().get("items", []) if (ev := _parse_gcal_event(item))]
+        # Filter to exact range
+        return [ev for ev in events if start_date <= ev.date <= end_date]
 
     async def create_event(self, title: str, date: str, time: str, duration: int, description: str = "") -> EventData:
         """Create a new calendar event."""

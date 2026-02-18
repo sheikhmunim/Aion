@@ -23,6 +23,8 @@ def print_banner() -> None:
 
 
 def print_status(gcal_ok: bool, ollama_ok: bool, ollama_model: str = "") -> None:
+    from aion.config import get_config
+    tz = get_config().get("timezone", "UTC")
     gcal = "[green]Connected[/]" if gcal_ok else "[red]Not logged in[/] (run: aion login)"
     console.print(f"  Google Calendar: {gcal}")
     if ollama_ok:
@@ -30,6 +32,7 @@ def print_status(gcal_ok: bool, ollama_ok: bool, ollama_model: str = "") -> None
         console.print(f"  Ollama{label}: [green]Available[/]")
     else:
         console.print("  Ollama: [yellow]Not running[/] (complex commands limited)")
+    console.print(f"  Timezone: [bold]{tz}[/]")
     console.print()
 
 

@@ -6,6 +6,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 AION_DIR = Path.home() / ".aion"
 CONFIG_FILE = AION_DIR / "config.json"
@@ -78,11 +79,17 @@ def reload_config() -> None:
     _config_cache = None
 
 
+def get_now() -> datetime:
+    """Return the current time in the user's configured timezone."""
+    tz_name = get_config().get("timezone", "UTC")
+    return datetime.now(ZoneInfo(tz_name))
+
+
 def get_preferences() -> dict:
     """Return preferences with expired blocked_slots filtered out."""
     cfg = get_config()
     prefs = cfg.get("preferences", {})
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = get_now().strftime("%Y-%m-%d")
 
     active_slots = []
     for slot in prefs.get("blocked_slots", []):

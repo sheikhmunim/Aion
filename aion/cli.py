@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from datetime import datetime
 
 from rich.console import Console
 from rich.prompt import Prompt
 
 from aion import display
-from aion.config import clear_tokens, get_config, get_preferences, get_tokens, save_config, save_preferences
+from aion.config import clear_tokens, get_config, get_now, get_preferences, get_tokens, save_config, save_preferences
 from aion.google_cal import EventData, GoogleCalendar
 from aion.intent import ParsedCommand, classify
 from aion.ollama import ollama_available, reset_status
@@ -31,6 +30,34 @@ def _find_event_by_title(events: list[EventData], title: str) -> EventData | Non
         if t in ev.title.lower() or ev.title.lower() in t:
             return ev
     return None
+
+
+def _check_preference_block(date: str, time: str, duration: int) -> list[dict]:
+    """Check if a proposed time overlaps with preference-blocked slots."""
+    from aion.asp_model import ASPModel
+    model = ASPModel()
+    prefs = get_preferences()
+    weekday = model.date_to_weekday(date)
+    today = get_now().strftime("%Y-%m-%d")
+
+    try:
+        new_start = model.time_to_slot(time)
+    except (ValueError, IndexError):
+        return []
+    new_end = new_start + model.duration_to_slots(duration)
+
+    hits = []
+    for block in prefs.get("blocked_slots", []):
+        until = block.get("until")
+        if until and until < today:
+            continue
+        if weekday not in block.get("days", []):
+            continue
+        block_start = model.time_to_slot(block["start"])
+        block_end = model.time_to_slot(block["end"])
+        if new_start < block_end and new_end > block_start:
+            hits.append(block)
+    return hits
 
 
 def _check_conflict(events: list[EventData], date: str, time: str, duration: int) -> list[EventData]:
@@ -63,34 +90,41 @@ async def handle_schedule(cmd: ParsedCommand, gcal: GoogleCalendar, solver: Sche
         return
 
     title = cmd.title  # label if set, otherwise activity
-    date = cmd.dates[0] if cmd.dates else datetime.now().strftime("%Y-%m-%d")
+    date = cmd.dates[0] if cmd.dates else get_now().strftime("%Y-%m-%d")
     duration = cmd.duration or int(get_config().get("default_duration", 60))
 
     # Always fetch existing events for conflict checking
     with console.status("Fetching calendar..."):
         events = await gcal.list_events(date)
 
-    # Explicit time given — check for conflicts
+    # Explicit time given — check for conflicts and preference blocks
     if cmd.time:
         conflicts = _check_conflict(events, date, cmd.time, duration)
-        if conflicts:
-            display.print_error(f"Conflict! '{cmd.time}' overlaps with:")
-            for c in conflicts:
-                console.print(f"    - {c.time} — {c.title} ({c.duration} min)")
+        pref_blocks = _check_preference_block(date, cmd.time, duration)
+
+        has_issue = bool(conflicts or pref_blocks)
+        if has_issue:
+            if conflicts:
+                display.print_error(f"Conflict! '{cmd.time}' overlaps with:")
+                for c in conflicts:
+                    console.print(f"    - {c.time} — {c.title} ({c.duration} min)")
+            if pref_blocks:
+                display.print_error(f"'{cmd.time}' falls in a blocked time slot:")
+                for b in pref_blocks:
+                    console.print(f"    - {b.get('label', 'Blocked')} ({b['start']} - {b['end']})")
             console.print()
             console.print("  What would you like to do?")
             console.print("    [bold]1.[/] Find the next best slot (recommended)")
-            console.print("    [bold]2.[/] Schedule anyway (overlap)")
+            console.print("    [bold]2.[/] Schedule anyway (override)")
             console.print("    [bold]3.[/] Cancel")
 
             choice = Prompt.ask("  Choose", choices=["1", "2", "3"], default="1")
-
             if choice == "3":
                 return
             elif choice == "2":
                 with console.status("Creating event..."):
                     ev = await gcal.create_event(title, date, cmd.time, duration)
-                display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time} (overlapping)")
+                display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time} (override)")
                 return
             # choice == "1": fall through to solver below
         else:
@@ -121,22 +155,32 @@ async def handle_schedule(cmd: ParsedCommand, gcal: GoogleCalendar, solver: Sche
         display.print_error("No available slots found. Calendar may be full for this date.")
         return
 
-    # Collect all candidate slots from solver
-    all_slots = [s for group in solutions for s in (group if isinstance(group, list) else [group])]
+    # Collect all candidate slots from solver (deduplicate by time)
+    seen_times: set[str] = set()
+    all_slots: list[dict] = []
+    for group in solutions:
+        for s in (group if isinstance(group, list) else [group]):
+            key = f"{s.get('date')}_{s['time']}"
+            if key not in seen_times:
+                seen_times.add(key)
+                all_slots.append(s)
     slot_idx = 0
 
-    while slot_idx < len(all_slots):
-        best = all_slots[slot_idx]
-        date_display = cmd.date_label or best["date"]
+    while True:
+        # Suggest the current solver slot if available
+        if slot_idx < len(all_slots):
+            best = all_slots[slot_idx]
+            date_display = cmd.date_label or best["date"]
 
-        if display.confirm(f"Schedule '{title}' on {date_display} at {best['time']} for {duration} min?"):
-            with console.status("Creating event..."):
-                ev = await gcal.create_event(title, best["date"], best["time"], duration)
-            display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time}")
-            return
+            if display.confirm(f"Schedule '{title}' on {date_display} at {best['time']} for {duration} min?"):
+                with console.status("Creating event..."):
+                    ev = await gcal.create_event(title, best["date"], best["time"], duration)
+                display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time}")
+                return
 
-        # User declined — offer alternatives
-        slot_idx += 1
+            slot_idx += 1
+
+        # Always show alternatives after declining (or when solver slots exhausted)
         has_more = slot_idx < len(all_slots)
 
         console.print()
@@ -144,18 +188,18 @@ async def handle_schedule(cmd: ParsedCommand, gcal: GoogleCalendar, solver: Sche
         if has_more:
             next_slot = all_slots[slot_idx]
             console.print(f"    [bold]1.[/] Try next slot ({next_slot['time']})")
-        console.print(f"    [bold]2.[/] Pick a time preference (morning / afternoon / evening)")
-        console.print(f"    [bold]3.[/] Enter a specific time")
-        console.print(f"    [bold]4.[/] Cancel")
+        console.print("    [bold]2.[/] Pick a time preference (morning / afternoon / evening)")
+        console.print("    [bold]3.[/] Enter a specific time")
+        console.print("    [bold]4.[/] Cancel")
 
         valid = ["1", "2", "3", "4"] if has_more else ["2", "3", "4"]
-        choice = Prompt.ask("  Choose", choices=valid, default=valid[0])
+        choice = Prompt.ask("  Choose", choices=valid, default="3")
 
         if choice == "4":
             return
 
         if choice == "1" and has_more:
-            continue  # loop will show next slot
+            continue  # loop will suggest next slot
 
         if choice == "2":
             pref = Prompt.ask("  Preference", choices=["morning", "afternoon", "evening"])
@@ -164,39 +208,64 @@ async def handle_schedule(cmd: ParsedCommand, gcal: GoogleCalendar, solver: Sche
             request["prefer_evening"] = pref == "evening"
             new_solutions = solver.find_available_slots([e.to_dict() for e in events], request)
             if new_solutions and not (isinstance(new_solutions[0], dict) and "error" in new_solutions[0]):
-                all_slots = [s for group in new_solutions for s in (group if isinstance(group, list) else [group])]
+                seen_times.clear()
+                all_slots.clear()
+                for group in new_solutions:
+                    for s in (group if isinstance(group, list) else [group]):
+                        key = f"{s.get('date')}_{s['time']}"
+                        if key not in seen_times:
+                            seen_times.add(key)
+                            all_slots.append(s)
                 slot_idx = 0
                 continue
             display.print_error(f"No {pref} slots available.")
-            return
+            continue
 
         if choice == "3":
-            time_str = Prompt.ask("  Enter time (e.g. 2pm, 14:00)")
             from aion.intent import _extract_time
-            parsed_time = _extract_time(f"at {time_str}")
-            if not parsed_time:
+            while True:
+                time_str = Prompt.ask("  Enter time (e.g. 2pm, 14:00)")
+                parsed_time = _extract_time(f"at {time_str}")
+                if parsed_time:
+                    break
                 display.print_error(f"Couldn't parse '{time_str}'. Try formats like 2pm, 14:00, 9:30am.")
-                return
+
+            # Check event conflicts
             conflicts = _check_conflict(events, date, parsed_time, duration)
             if conflicts:
                 display.print_error(f"Conflict at {parsed_time} with:")
                 for c in conflicts:
                     console.print(f"    - {c.time} — {c.title} ({c.duration} min)")
                 if not display.confirm("Schedule anyway (overlap)?"):
-                    return
+                    continue
+
+            # Check preference blocks
+            pref_blocks = _check_preference_block(date, parsed_time, duration)
+            if pref_blocks:
+                display.print_error(f"'{parsed_time}' falls in a blocked time slot:")
+                for b in pref_blocks:
+                    console.print(f"    - {b.get('label', 'Blocked')} ({b['start']} - {b['end']})")
+                if not display.confirm("Schedule anyway (override preference)?"):
+                    continue
+
             with console.status("Creating event..."):
                 ev = await gcal.create_event(title, date, parsed_time, duration)
             display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time}")
             return
 
-    display.print_error("No more available slots for this date.")
-
 
 async def handle_list(cmd: ParsedCommand, gcal: GoogleCalendar) -> None:
-    date = cmd.dates[0] if cmd.dates else None
-    label = cmd.date_label or ("today" if not date else date)
-    with console.status("Fetching events..."):
-        events = await gcal.list_events(date)
+    label = cmd.date_label or ("today" if not cmd.dates else cmd.dates[0])
+
+    if len(cmd.dates) > 1:
+        # Date range (e.g. "this week") — fetch from first to last date
+        with console.status("Fetching events..."):
+            events = await gcal.list_events_range(cmd.dates[0], cmd.dates[-1])
+    else:
+        date = cmd.dates[0] if cmd.dates else None
+        with console.status("Fetching events..."):
+            events = await gcal.list_events(date)
+
     display.print_events(events, label)
 
 
@@ -206,7 +275,7 @@ async def handle_delete(cmd: ParsedCommand, gcal: GoogleCalendar) -> None:
         return
 
     # Default to today if no date specified — most deletes are for today's events
-    date = cmd.dates[0] if cmd.dates else datetime.now().strftime("%Y-%m-%d")
+    date = cmd.dates[0] if cmd.dates else get_now().strftime("%Y-%m-%d")
     with console.status("Fetching events..."):
         events = await gcal.list_events(date)
 
@@ -263,7 +332,7 @@ async def handle_update(cmd: ParsedCommand, gcal: GoogleCalendar) -> None:
 
 
 async def handle_find_free(cmd: ParsedCommand, gcal: GoogleCalendar, solver: ScheduleSolver) -> None:
-    date = cmd.dates[0] if cmd.dates else datetime.now().strftime("%Y-%m-%d")
+    date = cmd.dates[0] if cmd.dates else get_now().strftime("%Y-%m-%d")
     label = cmd.date_label or date
 
     with console.status("Fetching events..."):
