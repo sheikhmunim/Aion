@@ -11,7 +11,7 @@ Schedule, list, reschedule, and find free time — all from natural language in 
   ✔ Created! 'gym' on 2026-02-19 at 07:00
 ```
 
-Part of [A.U.R.A](https://github.com/munimdev) (Autonomous Unified Reasoning Assistant).
+Part of [A.U.R.A](https://github.com/sheikhmunim) (Autonomous Unified Reasoning Assistant).
 
 ---
 
@@ -53,70 +53,37 @@ User Input
 
 ---
 
-## Prerequisites
+## Quick Start
 
-- **Python 3.10+**
-- **Google Cloud project** with Calendar API enabled and OAuth 2.0 credentials (Desktop app type)
+```bash
+pip install aion-agent
+aion login
+aion
+```
+
+That's it. `aion login` opens your browser for Google sign-in. Your timezone is auto-detected. No API keys or configuration needed.
+
+On first run, Aion offers to install [Ollama](https://ollama.com) for smarter natural language understanding — this is optional.
 
 ---
 
 ## Installation
 
+**From PyPI:**
+
 ```bash
-# Clone the repo
-git clone https://github.com/munimdev/Aion.git
+pip install aion-agent
+```
+
+**From source:**
+
+```bash
+git clone https://github.com/sheikhmunim/Aion.git
 cd Aion
-
-# Install (editable mode)
 pip install -e .
-
-# Or with dev tools (pytest, ruff)
-pip install -e ".[dev]"
 ```
 
-This installs the `aion` command globally.
-
----
-
-## Setup
-
-### 1. Google Calendar credentials
-
-Create OAuth 2.0 credentials in [Google Cloud Console](https://console.cloud.google.com/apis/credentials) (application type: Desktop app).
-
-Set them as environment variables or in `~/.aion/config.json`:
-
-```bash
-# Environment variables
-export AION_GOOGLE_CLIENT_ID="your-client-id"
-export AION_GOOGLE_CLIENT_SECRET="your-client-secret"
-```
-
-Or create `~/.aion/config.json`:
-
-```json
-{
-  "google_client_id": "your-client-id",
-  "google_client_secret": "your-client-secret"
-}
-```
-
-### 2. Login
-
-```bash
-aion login
-```
-
-Opens your browser for Google OAuth. After login, Aion automatically detects your timezone from Google Calendar and saves it to config.
-
-### 3. Smart understanding (optional)
-
-On first interactive run, Aion offers to install [Ollama](https://ollama.com) for better natural language understanding. This is optional — basic regex parsing works without it.
-
-```bash
-# Or set up manually
-aion setup
-```
+Requires **Python 3.10+**.
 
 ---
 
@@ -167,8 +134,8 @@ Config lives at `~/.aion/config.json`. All options can also be set via environme
 
 | Key | Env var | Default | Description |
 |-----|---------|---------|-------------|
-| `google_client_id` | `AION_GOOGLE_CLIENT_ID` | — | OAuth client ID |
-| `google_client_secret` | `AION_GOOGLE_CLIENT_SECRET` | — | OAuth client secret |
+| `google_client_id` | `AION_GOOGLE_CLIENT_ID` | Built-in | OAuth client ID (override with your own if needed) |
+| `google_client_secret` | `AION_GOOGLE_CLIENT_SECRET` | Built-in | OAuth client secret |
 | `timezone` | `AION_TIMEZONE` | `UTC` | IANA timezone (auto-detected on login) |
 | `default_duration` | `AION_DEFAULT_DURATION` | `60` | Default event duration in minutes |
 | `ollama_url` | `AION_OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
@@ -212,6 +179,10 @@ ruff check aion/
 | [rich](https://rich.readthedocs.io/) | Terminal UI |
 
 ---
+
+## Privacy
+
+Aion runs entirely on your machine. No calendar data is sent to external servers. See [PRIVACY.md](PRIVACY.md) for details.
 
 ## License
 
