@@ -3,7 +3,7 @@
 import clingo
 
 from aion.asp_model import ASPModel
-from aion.config import get_preferences
+from aion.config import get_now, get_preferences
 
 
 class ScheduleSolver:
@@ -79,8 +79,7 @@ class ScheduleSolver:
         # Also block preference slots
         prefs = get_preferences()
         weekday = self.model.date_to_weekday(date)
-        from datetime import datetime
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = get_now().strftime("%Y-%m-%d")
         for block in prefs.get("blocked_slots", []):
             until = block.get("until")
             if until and until < today:

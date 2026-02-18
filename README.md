@@ -1,451 +1,218 @@
-# Aion — A.U.R.A Calendar & Scheduling Module
+# Aion
 
-**Part of A.U.R.A (Autonomous Unified Reasoning Assistant)**
+**AI-powered calendar agent for Google Calendar.**
 
-An Outlook-style calendar application with month/week views, event management, AI chat assistant (Ollama), and constraint-based scheduling (Clingo ASP).
+Schedule, list, reschedule, and find free time — all from natural language in your terminal.
 
-![Calendar App](CalendarWindow.png)
+```
+  aion > schedule gym tomorrow morning
+  Finding optimal slot for 'gym'...
+  Schedule 'gym' on February 19, 2026 at 07:00 for 60 min? [y/n]: y
+  ✔ Created! 'gym' on 2026-02-19 at 07:00
+```
+
+Part of [A.U.R.A](https://github.com/munimdev) (Autonomous Unified Reasoning Assistant).
 
 ---
 
 ## Features
 
-- **Month View**: Grid calendar with event pills, click to select, double-click to add
-- **Week View**: Time-based view (6AM-10PM) with positioned events
-- **Event Management**: Create, edit, delete events with categories
-- **Conflict Detection**: Warns when events overlap
-- **AI Chat Assistant**: Natural language scheduling via Ollama LLM
-- **Smart Query Processing**: Date queries handled without LLM for speed and accuracy
-- **Persistent Storage**: Events saved to JSON file
+- **Natural language** — "schedule dentist friday at 2pm for 45 min", "what's on tomorrow?"
+- **Smart scheduling** — ASP/Clingo constraint solver finds optimal slots avoiding conflicts
+- **Google Calendar sync** — reads and writes real events via Calendar API v3
+- **Conflict detection** — warns on overlaps, offers alternatives
+- **User preferences** — block time slots (lunch, sleep), set default morning/afternoon/evening
+- **Timezone-aware** — auto-detects your timezone from Google Calendar on login
+- **Ollama NLU** (optional) — local LLM fallback for complex commands, auto-installs on first run
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  Calendar UI    │────▶│  calendar_server │────▶│   Ollama    │
-│  (React/TSX)    │◀────│  (FastAPI)       │◀────│  (qwen2.5)  │
-└─────────────────┘     └──────────────────┘     └─────────────┘
-                               │
-                               ▼
-                        ┌──────────────┐
-                        │ events.json  │
-                        └──────────────┘
+User Input
+    │
+    ▼
+┌──────────────┐    ┌──────────────┐
+│ Regex NLU    │───▶│ Ollama LLM   │  (optional fallback)
+│ (intent.py)  │    │ (ollama.py)  │
+└──────┬───────┘    └──────────────┘
+       │
+       ▼
+┌──────────────┐    ┌──────────────┐
+│ ASP Solver   │───▶│    Clingo    │  (constraint solving)
+│ (solver.py)  │    │              │
+└──────┬───────┘    └──────────────┘
+       │
+       ▼
+┌──────────────┐
+│ Google Cal   │  (httpx async)
+│ (google_cal) │
+└──────────────┘
 ```
 
 ---
 
 ## Prerequisites
 
-### 1. Python 3.10+
-
-Download from [python.org](https://www.python.org/downloads/)
-
-Verify installation:
-```bash
-python --version
-```
-
-### 2. Ollama (for AI features)
-
-Download from [ollama.com](https://ollama.com/download)
-
-**Windows:**
-```bash
-winget install Ollama.Ollama
-```
-
-**macOS:**
-```bash
-brew install ollama
-```
-
-**Linux:**
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-```
+- **Python 3.10+**
+- **Google Cloud project** with Calendar API enabled and OAuth 2.0 credentials (Desktop app type)
 
 ---
 
 ## Installation
 
-### Step 1: Clone/Navigate to the App
-
 ```bash
-cd D:\A.U.R.A\Aion
+# Clone the repo
+git clone https://github.com/munimdev/Aion.git
+cd Aion
+
+# Install (editable mode)
+pip install -e .
+
+# Or with dev tools (pytest, ruff)
+pip install -e ".[dev]"
 ```
 
-### Step 2: Create Python Virtual Environment
-
-```bash
-# Create venv
-python -m venv venv
-
-# Activate venv (Windows Command Prompt)
-venv\Scripts\activate.bat
-
-# Activate venv (Windows PowerShell)
-.\venv\Scripts\Activate.ps1
-
-# Activate venv (Linux/macOS)
-source venv/bin/activate
-```
-
-**PowerShell Execution Policy Error?**
-Run as Administrator:
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
-### Step 3: Install Python Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-Or manually:
-```bash
-pip install fastapi uvicorn httpx pydantic
-```
-
-### Step 4: Pull the LLM Model
-
-```bash
-# Start Ollama service (if not running)
-ollama serve
-
-# Pull the model (in another terminal)
-ollama pull qwen2.5:3b
-```
+This installs the `aion` command globally.
 
 ---
 
-## LLM Model Options
+## Setup
 
-| Model | Size | RAM Needed | Quality | Command |
-|-------|------|------------|---------|---------|
-| `qwen2.5:0.5b` | ~400MB | 2GB | Basic | `ollama pull qwen2.5:0.5b` |
-| `qwen2.5:1.5b` | ~1GB | 4GB | Good | `ollama pull qwen2.5:1.5b` |
-| **`qwen2.5:3b`** | ~2GB | 6GB | **Recommended** | `ollama pull qwen2.5:3b` |
-| `qwen2.5:7b` | ~4.5GB | 10GB | Best | `ollama pull qwen2.5:7b` |
+### 1. Google Calendar credentials
 
-**Default model:** `qwen2.5:3b`
+Create OAuth 2.0 credentials in [Google Cloud Console](https://console.cloud.google.com/apis/credentials) (application type: Desktop app).
 
-To change the model, edit `calendar_server.py` line ~47:
-```python
-OLLAMA_MODEL = "qwen2.5:3b"  # Change this
-```
+Set them as environment variables or in `~/.aion/config.json`:
 
----
-
-## Running the App
-
-### Option 1: Command Line
-
-**Terminal 1 - Start Ollama:**
 ```bash
-ollama serve
+# Environment variables
+export AION_GOOGLE_CLIENT_ID="your-client-id"
+export AION_GOOGLE_CLIENT_SECRET="your-client-secret"
 ```
 
-**Terminal 2 - Start Calendar Server:**
+Or create `~/.aion/config.json`:
+
+```json
+{
+  "google_client_id": "your-client-id",
+  "google_client_secret": "your-client-secret"
+}
+```
+
+### 2. Login
+
 ```bash
-cd D:\A.U.R.A\Aion
-
-# Activate venv (Windows)
-venv\Scripts\activate.bat
-
-# Start server
-python calendar_server.py 8767
+aion login
 ```
 
-You should see:
-```
-Loaded 0 events from ...\data\events.json
-Ollama available: True
-Starting Calendar App server on port 8767...
+Opens your browser for Google OAuth. After login, Aion automatically detects your timezone from Google Calendar and saves it to config.
+
+### 3. Smart understanding (optional)
+
+On first interactive run, Aion offers to install [Ollama](https://ollama.com) for better natural language understanding. This is optional — basic regex parsing works without it.
+
+```bash
+# Or set up manually
+aion setup
 ```
 
 ---
 
 ## Usage
 
-### Calendar Navigation
+Start the interactive CLI:
 
-| Action | How |
-|--------|-----|
-| Previous month/week | Click `<` button |
-| Next month/week | Click `>` button |
-| Go to today | Click `Today` button |
-| Switch view | Click `Month` or `Week` |
-
-### Event Management
-
-| Action | How |
-|--------|-----|
-| Create event | Click `+ Event` or double-click a day |
-| Edit event | Click on an event pill |
-| Delete event | Open event → click `Delete` |
-| View conflicts | Shown in red when saving overlapping events |
-
-### Event Categories
-
-| Category | Color |
-|----------|-------|
-| Work | Blue |
-| Personal | Green |
-| Health | Red |
-| Meeting | Purple |
-| Reminder | Amber |
-| Other | Gray |
-
-### AI Chat Assistant
-
-The chat panel on the right lets you manage your calendar with natural language.
-
-**Query Examples:**
-```
-"What's on my calendar today?"
-"Any events tomorrow?"
-"Am I free on Friday?"
-"What do I have this week?"
-"Show me March"
+```bash
+aion
 ```
 
-**Add Events:**
+### Commands
+
+| Action | Examples |
+|--------|----------|
+| **Schedule** | `schedule gym tomorrow morning`, `add meeting at 3pm for 90 min` |
+| **List** | `what's on today?`, `show my calendar this week`, `what tomorrow?` |
+| **Delete** | `cancel gym tomorrow`, `delete meeting` |
+| **Update** | `move gym to 3pm`, `reschedule meeting to friday` |
+| **Free slots** | `when am I free tomorrow?`, `free slots this week` |
+| **Best time** | `best time for a 2h study session` |
+| **Preferences** | `preferences` — manage blocked times and defaults |
+| **Login/Logout** | `login`, `logout` |
+| **Help** | `help` |
+| **Quit** | `quit` or `exit` |
+
+### Preferences
+
+Block recurring time slots and set defaults:
+
 ```
-"Add a meeting with John tomorrow at 2pm"
-"Schedule dentist appointment on Friday at 10am for 45 minutes"
-"Create a gym session Monday at 6pm"
+aion > preferences
+  ┌─────────────────────────────────────────────┐
+  │ 1. Add a blocked time slot                  │
+  │ 2. Remove a blocked slot                    │
+  │ 3. Change default time preference           │
+  │ 4. Back                                     │
+  └─────────────────────────────────────────────┘
 ```
 
-**Delete Events:**
-```
-"Delete the meeting tomorrow"
-"Remove the gym event"
-"Cancel my dentist appointment"
-```
+Blocked slots (e.g. lunch 12:00-13:00 on weekdays) are respected by the scheduler — it won't suggest times during those windows.
 
-**Update Events:**
-```
-"Change the meeting time to 3pm"
-"Move my dentist appointment to Tuesday"
+---
+
+## Configuration
+
+Config lives at `~/.aion/config.json`. All options can also be set via environment variables with `AION_` prefix.
+
+| Key | Env var | Default | Description |
+|-----|---------|---------|-------------|
+| `google_client_id` | `AION_GOOGLE_CLIENT_ID` | — | OAuth client ID |
+| `google_client_secret` | `AION_GOOGLE_CLIENT_SECRET` | — | OAuth client secret |
+| `timezone` | `AION_TIMEZONE` | `UTC` | IANA timezone (auto-detected on login) |
+| `default_duration` | `AION_DEFAULT_DURATION` | `60` | Default event duration in minutes |
+| `ollama_url` | `AION_OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
+| `ollama_model` | `AION_OLLAMA_MODEL` | `qwen2.5:0.5b` | Ollama model for NLU |
+
+---
+
+## Development
+
+```bash
+# Install with dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest tests/ -v
+
+# Lint
+ruff check aion/
 ```
 
 ---
 
-## API Reference
+## How it works
 
-Base URL: `http://127.0.0.1:8767`
+1. **Intent classification** — Regex patterns match commands (schedule, list, delete, etc.) with confidence scores. Falls back to Ollama LLM for ambiguous input.
 
-### Status
+2. **Date parsing** — Handles "today", "tomorrow", weekday names, "this/next week", specific dates like "March 5th", and common typos.
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | Health check |
-| GET | `/status` | Server status + Ollama availability |
+3. **Constraint solving** — The ASP/Clingo solver models the day as 30-minute slots (6AM-10PM), marks busy times from existing events and user preferences, then finds optimal placements with time-of-day preferences.
 
-### Events
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/events` | List all events |
-| GET | `/events?date=YYYY-MM-DD` | List events for specific date |
-| POST | `/events` | Create event |
-| GET | `/events/{id}` | Get single event |
-| PUT | `/events/{id}` | Update event |
-| DELETE | `/events/{id}` | Delete event |
-
-### Chat
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/chat` | Send message (non-streaming) |
-| POST | `/chat/stream` | Send message (streaming) |
-| POST | `/chat/clear` | Clear chat history |
-| POST | `/chat/parse` | Debug: test date parsing |
-
-### Example API Calls
-
-```bash
-# Check status
-curl http://127.0.0.1:8767/status
-
-# Create event
-curl -X POST http://127.0.0.1:8767/events \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Team Meeting", "date": "2026-02-05", "time": "14:00", "duration": 60, "category": "meeting"}'
-
-# List events
-curl http://127.0.0.1:8767/events
-
-# Chat with AI
-curl -X POST http://127.0.0.1:8767/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "What events do I have tomorrow?"}'
-
-# Delete event
-curl -X DELETE http://127.0.0.1:8767/events/EVENT_ID
-```
-
----
-
-## File Structure
-
-```
-Aion/
-├── agent/
-│   ├── __init__.py            # Exports ASPModel + ScheduleSolver
-│   ├── asp_model.py           # ASP program generator (standalone R&D)
-│   └── solver.py              # Clingo solver interface
-├── CalendarWindow.tsx         # React frontend component
-├── CalendarWindow.meta.json   # Icon/color metadata
-├── CalendarWindow.png         # Preview image
-├── calendar_server.py         # FastAPI backend server
-├── requirements.txt           # Python dependencies
-├── description.txt            # App description
-├── README.md                  # This file
-└── data/
-    └── events.json            # Persistent event storage
-```
-
----
-
-## How the AI Works
-
-### Smart Pre-Processing
-
-Date-related queries are handled **without calling the LLM** for speed and accuracy:
-
-```
-User: "Any events in March?"
-         │
-         ▼
-┌─────────────────────────────────────────┐
-│ PRE-PROCESSOR (No LLM needed!)          │
-│ 1. Detects "March" → month query        │
-│ 2. Calculates dates: 2026-03-01 to 31   │
-│ 3. Searches events.json                 │
-│ 4. Returns: "No events for March 2026"  │
-└─────────────────────────────────────────┘
-```
-
-**Supported without LLM:**
-- today, tomorrow, yesterday
-- Weekdays (Monday, Tuesday, etc.)
-- this week, next week
-- Month names (January, February, etc.)
-- Specific dates (February 5, 5th of March)
-
-### LLM Actions
-
-The LLM is used for:
-- Adding events from natural language
-- Deleting events
-- Updating events
-- Complex conversational queries
-
-**Action Format:**
-```
-ACTION: ADD_EVENT
-{"title": "Meeting", "date": "2026-02-05", "time": "14:00", "duration": 60, "category": "meeting"}
-
-ACTION: DELETE_EVENT
-{"id": "abc123"}
-
-ACTION: UPDATE_EVENT
-{"id": "abc123", "title": "New Title", "time": "15:00"}
-```
-
----
-
-## Troubleshooting
-
-### "Ollama not available"
-
-1. Make sure Ollama is installed
-2. Start Ollama: `ollama serve`
-3. Pull the model: `ollama pull qwen2.5:3b`
-
-### "Cannot activate virtual environment" (PowerShell)
-
-Run as Administrator:
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
-### "Module not found" errors
-
-Make sure venv is activated and dependencies installed:
-```bash
-venv\Scripts\activate.bat
-pip install -r requirements.txt
-```
-
-### Events not persisting
-
-Check that `data/events.json` exists and is writable:
-```bash
-dir data\events.json
-```
-
-### LLM giving wrong answers
-
-- Use a larger model (`qwen2.5:3b` or `qwen2.5:7b`)
-- The pre-processor handles most date queries accurately without LLM
-
-### Port already in use
-
-Change the port:
-```bash
-python calendar_server.py 8768
-```
+4. **Google Calendar API** — All reads/writes go through Calendar API v3 via httpx async. Token refresh is automatic.
 
 ---
 
 ## Dependencies
 
-### Python Packages
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| fastapi | ≥0.104.0 | Web framework |
-| uvicorn | ≥0.24.0 | ASGI server |
-| httpx | ≥0.25.0 | HTTP client for Ollama |
-| pydantic | ≥2.0.0 | Data validation |
-
-### External Services
-
-| Service | Purpose | Required |
-|---------|---------|----------|
-| Ollama | Local LLM inference | For AI chat features |
+| Package | Purpose |
+|---------|---------|
+| [clingo](https://potassco.org/clingo/) | ASP constraint solver |
+| [httpx](https://www.python-httpx.org/) | Async HTTP client (Google Calendar + Ollama) |
+| [rich](https://rich.readthedocs.io/) | Terminal UI |
 
 ---
 
 ## License
 
-Aion is part of the **A.U.R.A** (Autonomous Unified Reasoning Assistant) project.
-
----
-
-## Quick Start Summary
-
-```bash
-# 1. Install Ollama and pull model
-ollama pull qwen2.5:3b
-
-# 2. Setup Python environment
-cd D:\A.U.R.A\Aion
-python -m venv venv
-venv\Scripts\activate.bat
-pip install -r requirements.txt
-
-# 3. Start Ollama (Terminal 1)
-ollama serve
-
-# 4. Start Calendar Server (Terminal 2)
-python calendar_server.py 8767
-
-# 5. Open in browser or connect via A.U.R.A
-# API available at http://127.0.0.1:8767
-```
+MIT License. See [LICENSE](LICENSE).

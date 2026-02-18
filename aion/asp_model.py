@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta
 
+from aion.config import get_now
+
 
 class ASPModel:
     """Generates ASP rules for calendar scheduling.
@@ -38,7 +40,7 @@ class ASPModel:
         if start_date:
             start = datetime.strptime(start_date, "%Y-%m-%d")
         else:
-            start = datetime.now()
+            start = get_now()
         start = start - timedelta(days=start.weekday())
         return [(start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
 
@@ -167,7 +169,7 @@ evening(24..{self.total_slots - 1}).
 
         If target_date is given, only generate facts for that date's weekday.
         """
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = get_now().strftime("%Y-%m-%d")
         lines = ["\n% Blocked times from user preferences"]
 
         for block in blocked_slots:

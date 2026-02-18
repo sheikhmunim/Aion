@@ -11,7 +11,7 @@ from threading import Thread
 
 import httpx
 
-from aion.config import get_config, save_tokens
+from aion.config import get_config, save_config, save_tokens
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -111,4 +111,21 @@ async def login() -> bool:
         "expires_in": tokens.get("expires_in", 3600),
         "token_type": tokens.get("token_type", "Bearer"),
     })
+
+    # Auto-detect user's timezone from Google Calendar
+    try:
+        async with httpx.AsyncClient() as client:
+            cal_resp = await client.get(
+                "https://www.googleapis.com/calendar/v3/calendars/primary",
+                headers={"Authorization": f"Bearer {tokens['access_token']}"},
+            )
+            if cal_resp.status_code == 200:
+                tz = cal_resp.json().get("timeZone")
+                if tz:
+                    cfg = get_config()
+                    cfg["timezone"] = tz
+                    save_config(cfg)
+    except Exception:
+        pass  # non-critical — falls back to existing config timezone
+
     return True

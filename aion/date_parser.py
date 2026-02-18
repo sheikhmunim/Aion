@@ -4,6 +4,8 @@ import calendar
 import re
 from datetime import datetime, timedelta
 
+from aion.config import get_now
+
 
 MONTH_NAMES: dict[str, int] = {
     "january": 1, "jan": 1,
@@ -55,7 +57,7 @@ def parse_date_from_query(message: str) -> dict:
     Returns: {type: 'date'|'month'|'week'|None, dates: [...], label: str}
     """
     message_lower = _fix_typos(message.lower())
-    today = datetime.now()
+    today = get_now()
     result: dict = {"type": None, "dates": [], "label": ""}
 
     if "today" in message_lower:
