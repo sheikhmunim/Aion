@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import json
+from datetime import date as date_cls, timedelta
 
 import httpx
 
-from aion.config import get_config
-from aion.date_parser import parse_date_from_query
-from aion.intent import ParsedCommand
+from aion.config import get_config, get_now
+from aion.intent import ParsedCommand, _extract_time
+
+
+def _clean(val: object) -> object:
+    """Convert LLM string 'null'/'none'/'' to Python None."""
+    if isinstance(val, str) and val.strip().lower() in ("null", "none", ""):
+        return None
+    return val
 
 _ollama_status: bool | None = None
 
@@ -40,7 +47,11 @@ def reset_status() -> None:
 
 
 async def ollama_classify(user_input: str, events: list[dict] | None = None) -> ParsedCommand:
-    """Use Ollama to parse a complex command into structured data."""
+    """Use Ollama to parse a command into structured data."""
+    now = get_now()
+    today = now.strftime("%Y-%m-%d")
+    weekday = now.strftime("%A")
+
     if events:
         summary = "\n".join(
             f"- {e.get('date', '?')} {e.get('time', '?')}: {e.get('title', '?')} ({e.get('duration', 60)}min)"
@@ -49,7 +60,7 @@ async def ollama_classify(user_input: str, events: list[dict] | None = None) -> 
     else:
         summary = "(no events loaded)"
 
-    prompt = f"""You are a calendar command parser. Extract intent and entities from this command.
+    prompt = f"""You are a calendar command parser. Today is {today} ({weekday}).
 
 Intents:
 - LIST = user wants to SEE/VIEW events ("what tomorrow?", "what I have today", "show my calendar")
@@ -70,8 +81,9 @@ Respond ONLY with valid JSON (no markdown, no explanation):
 {{
   "intent": "SCHEDULE|LIST|DELETE|UPDATE|FIND_FREE|FIND_OPTIMAL",
   "activity": "event title or null",
-  "date": "YYYY-MM-DD or relative like 'tomorrow' or null",
-  "time": "HH:MM or null",
+  "date": "YYYY-MM-DD resolved from today ({today}) or null",
+  "date_end": "YYYY-MM-DD for date ranges like this week or next week, otherwise null",
+  "time": "HH:MM in 24-hour format or null. For bare numbers like 'at 6' use context: gym/morning = 06:00, evening/dinner = 18:00",
   "duration": "minutes as integer or null",
   "time_pref": "morning|afternoon|evening|null"
 }}"""
@@ -98,18 +110,34 @@ Respond ONLY with valid JSON (no markdown, no explanation):
     if intent not in valid:
         intent = "UNKNOWN"
 
-    # Resolve date
-    date_str = data.get("date")
+    # Sanitize all fields — LLM sometimes returns the string "null" instead of JSON null
+    activity  = _clean(data.get("activity"))
+    date_str  = _clean(data.get("date"))
+    date_end_str = _clean(data.get("date_end"))
+    time_val  = _clean(data.get("time"))
+    time_pref = _clean(data.get("time_pref"))
+
+    # Time fallback — if Ollama returned null, try regex on the raw input (handles "at 6" etc.)
+    if time_val is None:
+        time_val = _extract_time(user_input)
+
+    # Resolve dates — Ollama returns YYYY-MM-DD directly
     dates: list[str] = []
     date_label = ""
+
     if date_str:
-        if len(date_str) == 10 and date_str[4] == "-":
+        try:
+            start = date_cls.fromisoformat(date_str)
+            if date_end_str:
+                end = date_cls.fromisoformat(date_end_str)
+                dates = [(start + timedelta(days=i)).isoformat() for i in range((end - start).days + 1)]
+                date_label = f"{start.strftime('%b %d')} – {end.strftime('%b %d')}"
+            else:
+                dates = [date_str]
+                date_label = start.strftime("%A, %B %d")
+        except ValueError:
             dates = [date_str]
             date_label = date_str
-        else:
-            info = parse_date_from_query(date_str)
-            dates = info.get("dates", [])
-            date_label = info.get("label", "")
 
     duration = data.get("duration")
     if duration is not None:
@@ -120,12 +148,12 @@ Respond ONLY with valid JSON (no markdown, no explanation):
 
     return ParsedCommand(
         intent=intent,
-        activity=data.get("activity"),
+        activity=activity,
         dates=dates,
         date_label=date_label,
-        time=data.get("time"),
+        time=time_val,
         duration=duration,
-        time_pref=data.get("time_pref"),
-        confidence=0.85,
+        time_pref=time_pref,
+        confidence=0.95,
         raw=user_input,
     )

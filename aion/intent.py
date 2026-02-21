@@ -214,20 +214,15 @@ def regex_classify(user_input: str) -> ParsedCommand:
 
 
 async def classify(user_input: str, events: list[dict] | None = None) -> ParsedCommand:
-    """Classify intent — LLM-first when available, regex as fallback."""
+    """Classify intent — Ollama when available, regex as offline fallback."""
     from aion.ollama import ollama_available, ollama_classify
+    from aion.config import get_config
 
-    # Fast path: very obvious commands skip LLM entirely
-    regex_result = regex_classify(user_input)
-    if regex_result.confidence >= 1.0:
-        return regex_result
-
-    # Primary: use Ollama LLM for robust natural language understanding
-    if ollama_available():
+    if ollama_available() and get_config().get("ollama_enabled", True):
         try:
             return await ollama_classify(user_input, events)
         except Exception:
             pass
 
-    # Fallback: regex result (works offline / without Ollama)
-    return regex_result
+    # Ollama not available — offline regex fallback
+    return regex_classify(user_input)

@@ -380,16 +380,20 @@ def handle_preferences() -> None:
 
     display.print_preferences(prefs)
 
+    ollama_on = get_config().get("ollama_enabled", True)
+    toggle_label = "Disable" if ollama_on else "Enable"
+
     console.print("  What would you like to do?")
     console.print("    [bold]1.[/] Add a blocked time slot")
     console.print("    [bold]2.[/] Remove a blocked slot")
     console.print("    [bold]3.[/] Change default time preference")
-    console.print("    [bold]4.[/] Back")
+    console.print(f"    [bold]4.[/] {toggle_label} smart commands (Ollama)")
+    console.print("    [bold]5.[/] Back")
     console.print()
 
-    choice = Prompt.ask("  Choose", choices=["1", "2", "3", "4"], default="4")
+    choice = Prompt.ask("  Choose", choices=["1", "2", "3", "4", "5"], default="5")
 
-    if choice == "4":
+    if choice == "5":
         return
 
     if choice == "1":
@@ -494,6 +498,17 @@ def handle_preferences() -> None:
         else:
             display.print_success(f"Default time preference set to: {pref}")
 
+    elif choice == "4":
+        # Toggle smart commands (Ollama)
+        cfg = get_config()
+        new_state = not cfg.get("ollama_enabled", True)
+        cfg["ollama_enabled"] = new_state
+        save_config(cfg)
+        if new_state:
+            display.print_success("Smart commands enabled.")
+        else:
+            display.print_success("Smart commands disabled.")
+
 
 async def handle_input(user_input: str, gcal: GoogleCalendar | None, solver: ScheduleSolver) -> bool:
     """Process one user input. Returns False to quit."""
@@ -525,6 +540,18 @@ async def handle_input(user_input: str, gcal: GoogleCalendar | None, solver: Sch
 
     if text.lower() in ("preferences", "prefs", "settings"):
         handle_preferences()
+        return True
+
+    if text.lower() in ("setup", "enable ollama", "setup ollama"):
+        cfg = get_config()
+        cfg.pop("ollama_setup_declined", None)
+        save_config(cfg)
+        from aion.setup import setup
+        if setup():
+            reset_status()
+            display.print_success("Smart command understanding enabled!")
+        else:
+            display.print_error("Setup failed. You can also run: aion setup (from terminal)")
         return True
 
     if gcal is None:
@@ -646,6 +673,11 @@ async def async_main() -> None:
                 gcal_ok = True
             except RuntimeError:
                 pass
+
+        # Re-check ollama after setup (ollama_available() returns cached value unless reset_status() was called)
+        if not ollama_ok and ollama_available():
+            ollama_ok = True
+            ollama_model = get_config().get("ollama_model", "")
 
 
 def main() -> None:
