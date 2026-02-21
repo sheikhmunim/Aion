@@ -12,7 +12,7 @@ import httpx
 
 from aion.config import get_config, save_config
 
-DEFAULT_MODEL = "qwen2.5:0.5b"
+DEFAULT_MODEL = "qwen2.5:3b"
 
 
 def _is_ollama_installed() -> bool:

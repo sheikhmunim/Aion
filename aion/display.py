@@ -24,14 +24,19 @@ def print_banner() -> None:
 
 def print_status(gcal_ok: bool, ollama_ok: bool, ollama_model: str = "") -> None:
     from aion.config import get_config
-    tz = get_config().get("timezone", "UTC")
+    cfg = get_config()
+    tz = cfg.get("timezone", "UTC")
+    ollama_enabled = cfg.get("ollama_enabled", True)
     gcal = "[green]Connected[/]" if gcal_ok else "[red]Not logged in[/] (run: aion login)"
     console.print(f"  Google Calendar: {gcal}")
-    if ollama_ok:
+    if ollama_ok and ollama_enabled:
         label = f" ({ollama_model})" if ollama_model else ""
         console.print(f"  Ollama{label}: [green]Available[/]")
+    elif ollama_ok and not ollama_enabled:
+        label = f" ({ollama_model})" if ollama_model else ""
+        console.print(f"  Ollama{label}: [yellow]Disabled[/] (type [bold]preferences[/] to re-enable)")
     else:
-        console.print("  Ollama: [yellow]Not running[/] (complex commands limited)")
+        console.print("  Ollama: [yellow]Not running[/] (type [bold]setup[/] to enable smart commands)")
     console.print(f"  Timezone: [bold]{tz}[/]")
     console.print()
 
@@ -49,6 +54,7 @@ def print_help() -> None:
     t.add_row("Login", '"login" — connect Google Calendar')
     t.add_row("Logout", '"logout" — disconnect Google Calendar')
     t.add_row("Preferences", '"preferences" — blocked times & defaults')
+    t.add_row("Setup", '"setup" — enable smart command understanding (Ollama)')
     t.add_row("Quit", '"quit" or "exit"')
     console.print(t)
 
@@ -116,15 +122,20 @@ def confirm(message: str) -> bool:
 
 def print_preferences(prefs: dict) -> None:
     """Display current preferences as a Rich table."""
+    from aion.config import get_config
     blocked = prefs.get("blocked_slots", [])
     default_pref = prefs.get("default_time_pref")
+    ollama_enabled = get_config().get("ollama_enabled", True)
 
     ALL_DAYS = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
     WEEKDAYS = {"monday", "tuesday", "wednesday", "thursday", "friday"}
     WEEKENDS = {"saturday", "sunday"}
 
+    state = "[green]On[/]" if ollama_enabled else "[yellow]Off[/]"
+    console.print(f"  Smart commands (Ollama): {state}")
+
     if not blocked and not default_pref:
-        console.print("  No preferences set yet.")
+        console.print()
         return
 
     if blocked:
