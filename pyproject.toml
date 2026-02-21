@@ -1,6 +1,6 @@
 [project]
 name = "aion-agent"
-version = "0.2.0"
+version = "0.2.1"
 description = "AI calendar scheduling agent for Google Calendar"
 readme = "README.md"
 license = "MIT"
