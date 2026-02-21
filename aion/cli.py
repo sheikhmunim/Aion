@@ -634,7 +634,7 @@ async def async_main() -> None:
     if not ollama_ok and not get_config().get("ollama_setup_declined"):
         from rich.prompt import Confirm as RichConfirm
         console.print()
-        if RichConfirm.ask("  Enable smart command understanding? (auto-installs Ollama, ~500MB download)", default=True):
+        if RichConfirm.ask("  Enable smart command understanding? (auto-installs Ollama + ~2GB model download)", default=True):
             from aion.setup import setup
             if setup():
                 reset_status()
