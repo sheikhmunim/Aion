@@ -1,6 +1,6 @@
 # Privacy Policy — Aion
 
-**Last updated:** February 18, 2026
+**Last updated:** February 27, 2026
 
 Aion is an open-source calendar scheduling agent that connects to your Google Calendar.
 
