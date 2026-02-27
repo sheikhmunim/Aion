@@ -83,6 +83,7 @@ coverage.xml
 
 # Secrets
 id.txt
+.pypirc
 
 # Claude Code
 .claude/

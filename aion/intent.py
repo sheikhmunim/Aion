@@ -226,3 +226,65 @@ async def classify(user_input: str, events: list[dict] | None = None) -> ParsedC
 
     # Ollama not available — offline regex fallback
     return regex_classify(user_input)
+
+
+# ── Multi-command support ──────────────────────────────────────────────────────
+
+_SPLIT_PAT = re.compile(
+    r"\s+(?:and(?:\s+also)?|then|also|plus|as\s+well\s+as)\s+", re.I
+)
+_DATE_KW = re.compile(
+    r"\b(?:today|tomorrow|yesterday|this\s+week|next\s+week"
+    r"|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    re.I,
+)
+_INTENT_VERB = re.compile(
+    r"\b(?:schedule|add|create|book|delete|cancel|remove"
+    r"|move|change|reschedule|update|find|show|list|plan)\b",
+    re.I,
+)
+
+
+def regex_split_and_classify(text: str) -> list[ParsedCommand]:
+    """Split on conjunctions and classify each chunk. Regex-only fallback."""
+    chunks = _SPLIT_PAT.split(text.strip())
+    if len(chunks) == 1:
+        return [regex_classify(text)]
+
+    # Heuristic gate — split only when there's evidence of truly separate commands:
+    # (a) at least two chunks carry DIFFERENT date keywords, OR
+    # (b) at least two chunks each contain their own intent verb.
+    date_sets = [frozenset(kw.lower() for kw in _DATE_KW.findall(c)) for c in chunks]
+    non_empty_dates = [s for s in date_sets if s]
+    has_distinct_dates = len(set(non_empty_dates)) >= 2
+
+    intent_count = sum(1 for c in chunks if _INTENT_VERB.search(c))
+
+    if not has_distinct_dates and intent_count < 2:
+        return [regex_classify(text)]
+
+    results: list[ParsedCommand] = []
+    last_intent = "UNKNOWN"
+    for chunk in chunks:
+        cmd = regex_classify(chunk.strip())
+        if cmd.intent == "UNKNOWN" and last_intent != "UNKNOWN":
+            cmd.intent = last_intent
+        if cmd.intent != "UNKNOWN":
+            last_intent = cmd.intent
+        results.append(cmd)
+
+    return results
+
+
+async def classify_all(text: str, events: list[dict] | None = None) -> list[ParsedCommand]:
+    """Classify intent(s) — returns list (len=1 for single, len≥2 for multi-command)."""
+    from aion.ollama import ollama_available, ollama_classify_multi
+    from aion.config import get_config
+
+    if ollama_available() and get_config().get("ollama_enabled", True):
+        try:
+            return await ollama_classify_multi(text, events)
+        except Exception:
+            pass
+
+    return regex_split_and_classify(text)
