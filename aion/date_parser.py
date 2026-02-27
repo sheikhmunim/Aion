@@ -102,6 +102,26 @@ def parse_date_from_query(message: str) -> dict:
         )
         return result
 
+    if "this month" in message_lower:
+        num_days = calendar.monthrange(today.year, today.month)[1]
+        dates = [f"{today.year}-{today.month:02d}-{d:02d}" for d in range(1, num_days + 1)]
+        result["type"] = "month"
+        result["dates"] = dates
+        result["label"] = today.strftime("%B %Y")
+        return result
+
+    if "next month" in message_lower:
+        if today.month == 12:
+            year, month = today.year + 1, 1
+        else:
+            year, month = today.year, today.month + 1
+        num_days = calendar.monthrange(year, month)[1]
+        dates = [f"{year}-{month:02d}-{d:02d}" for d in range(1, num_days + 1)]
+        result["type"] = "month"
+        result["dates"] = dates
+        result["label"] = f"{today.replace(year=year, month=month).strftime('%B')} {year}"
+        return result
+
     # Specific weekday — "next friday" vs "friday"
     for day_name, day_num in WEEKDAY_NAMES.items():
         if day_name in message_lower:

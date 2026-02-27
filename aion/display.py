@@ -65,13 +65,14 @@ def print_events(events: list[EventData], label: str = "") -> None:
         return
 
     t = Table(title=f"Events — {label}" if label else "Events", show_header=True, border_style="dim")
+    t.add_column("#", style="dim", justify="right")
     t.add_column("Date", style="dim")
     t.add_column("Time", style="bold")
     t.add_column("Event", style="cyan")
     t.add_column("Duration", justify="right")
 
     current_date = None
-    for ev in events:
+    for idx, ev in enumerate(events, 1):
         date_display = ""
         if ev.date != current_date:
             current_date = ev.date
@@ -79,7 +80,7 @@ def print_events(events: list[EventData], label: str = "") -> None:
                 date_display = datetime.strptime(ev.date, "%Y-%m-%d").strftime("%a %b %d")
             except ValueError:
                 date_display = ev.date
-        t.add_row(date_display, ev.time, ev.title, f"{ev.duration} min")
+        t.add_row(str(idx), date_display, ev.time, ev.title, f"{ev.duration} min")
 
     console.print(t)
 
@@ -178,6 +179,91 @@ def print_preferences(prefs: dict) -> None:
     if default_pref:
         console.print(f"\n  Default time preference: [bold]{default_pref}[/]")
     console.print()
+
+
+def print_session_history(events: list[EventData]) -> None:
+    """Show all events created in this session."""
+    if not events:
+        console.print("  Nothing scheduled this session yet.")
+        return
+    n = len(events)
+    t = Table(
+        title=f"Scheduled this session ({n} event{'s' if n != 1 else ''})",
+        show_header=True,
+        border_style="dim",
+    )
+    t.add_column("#", style="dim", justify="right")
+    t.add_column("Date", style="dim")
+    t.add_column("Time", style="bold")
+    t.add_column("Event", style="cyan")
+    t.add_column("Duration", justify="right")
+
+    for idx, ev in enumerate(events, 1):
+        try:
+            date_display = datetime.strptime(ev.date, "%Y-%m-%d").strftime("%a %b %d")
+        except ValueError:
+            date_display = ev.date
+        t.add_row(str(idx), date_display, ev.time, ev.title, f"{ev.duration} min")
+
+    console.print(t)
+
+
+def print_multicommand_preview(
+    commands: list,
+    conflicts: set[int] | None = None,
+    suggested: set[int] | None = None,
+) -> None:
+    """Render a preview table of multiple parsed commands before execution.
+
+    conflicts:  0-based indices that overlap with another command → red ⚠ rows.
+    suggested:  0-based indices whose time was set by the ASP solver → "(auto)" tag.
+    """
+    n = len(commands)
+    t = Table(title=f"Detected {n} commands", show_header=True, border_style="dim")
+    t.add_column("#", justify="right")
+    t.add_column("Action", style="bold cyan")
+    t.add_column("Event")
+    t.add_column("Date")
+    t.add_column("Time")
+    t.add_column("Duration", justify="right")
+
+    for i, cmd in enumerate(commands, 1):
+        idx = i - 1
+        clash = conflicts is not None and idx in conflicts
+        auto  = suggested is not None and idx in suggested
+
+        num_cell = f"[bold red]{i} ⚠[/]" if clash else f"[dim]{i}[/]"
+        action = cmd.intent.capitalize() if cmd.intent else "—"
+        event = cmd.title or "—"
+
+        if cmd.date_label:
+            date_str = cmd.date_label
+        elif cmd.dates:
+            try:
+                date_str = datetime.strptime(cmd.dates[0], "%Y-%m-%d").strftime("%b %d (%a)")
+            except ValueError:
+                date_str = cmd.dates[0]
+        else:
+            date_str = "—"
+
+        if cmd.time:
+            time_str = f"{cmd.time} [dim](auto)[/]" if auto else cmd.time
+        else:
+            time_str = "—"
+        dur_str = f"{cmd.duration} min" if cmd.duration else "default"
+
+        if clash:
+            t.add_row(num_cell, f"[red]{action}[/]", f"[red]{event}[/]",
+                      f"[red]{date_str}[/]", f"[red]{time_str}[/]", f"[red]{dur_str}[/]")
+        else:
+            t.add_row(num_cell, action, event, date_str, time_str, dur_str)
+
+    console.print(t)
+    if conflicts:
+        console.print(
+            "  [bold red]⚠[/]  Commands marked [bold red]⚠[/] have overlapping time slots "
+            "— edit times before confirming.\n"
+        )
 
 
 def guided_fallback() -> str | None:
