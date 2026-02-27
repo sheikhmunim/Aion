@@ -97,7 +97,9 @@ class GoogleCalendar:
                 },
             )
             if r.status_code != 200:
-                return False
+                raise RuntimeError(
+                    "Google session expired. Run 'login' to reconnect."
+                )
             data = r.json()
 
         self._access_token = data["access_token"]

@@ -630,8 +630,17 @@ async def async_main() -> None:
     ollama_ok = ollama_available()
     ollama_model = get_config().get("ollama_model", "") if ollama_ok else ""
 
+    # If Ollama was previously set up but server isn't running, start it silently
+    _startup_cfg = get_config()
+    if not ollama_ok and _startup_cfg.get("ollama_enabled") and not _startup_cfg.get("ollama_setup_declined"):
+        from aion.setup import start_ollama
+        if start_ollama():
+            reset_status()
+            ollama_ok = ollama_available()
+            ollama_model = _startup_cfg.get("ollama_model", "")
+
     # First run: offer to set up Ollama for smart understanding
-    if not ollama_ok and not get_config().get("ollama_setup_declined"):
+    elif not ollama_ok and not _startup_cfg.get("ollama_setup_declined"):
         from rich.prompt import Confirm as RichConfirm
         console.print()
         if RichConfirm.ask("  Enable smart command understanding? (auto-installs Ollama + ~2GB model download)", default=True):
