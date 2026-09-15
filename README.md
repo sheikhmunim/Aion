@@ -139,7 +139,7 @@ Config lives at `~/.aion/config.json`. All options can also be set via environme
 | `timezone` | `AION_TIMEZONE` | `UTC` | IANA timezone (auto-detected on login) |
 | `default_duration` | `AION_DEFAULT_DURATION` | `60` | Default event duration in minutes |
 | `ollama_url` | `AION_OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
-| `ollama_model` | `AION_OLLAMA_MODEL` | `qwen2.5:0.5b` | Ollama model for NLU |
+| `ollama_model` | `AION_OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model for NLU (reuses an existing pulled model if you have one) |
 
 ---
 
