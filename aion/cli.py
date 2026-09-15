@@ -26,10 +26,43 @@ _NUMBER_WORDS: dict[str, int] = {
 
 # Matches "delete/cancel/remove <number>" in the raw user input — used as a
 # fallback when Ollama hallucinates an activity name instead of passing "1" through.
+# The negative lookahead keeps "cancel 6 am meeting" from being misread as
+# "delete list-item #6" — a number right before am/pm/:NN is a time, not an index.
 _NUMERIC_DELETE_RE = re.compile(
-    r"\b(?:delete|cancel|remove)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b",
+    r"\b(?:delete|cancel|remove)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b"
+    r"(?!\s*(?:am|pm|:\d))",
     re.I,
 )
+
+# Bare time reference with no "at" prefix — "the 6am meeting", "cancel the 4 pm one" —
+# used to look events up by their start time, as opposed to _extract_time in intent.py
+# which requires "at <time>" and is for setting a *new* time.
+_BARE_TIME_12H = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", re.I)
+_BARE_TIME_24H = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
+
+
+def _extract_bare_time(text: str) -> str | None:
+    """Extract a time reference from text without requiring an 'at' cue."""
+    m = _BARE_TIME_12H.search(text)
+    if m:
+        hour = int(m.group(1))
+        minute = int(m.group(2) or 0)
+        if m.group(3).lower() == "pm" and hour != 12:
+            hour += 12
+        elif m.group(3).lower() == "am" and hour == 12:
+            hour = 0
+        return f"{hour:02d}:{minute:02d}"
+    m = _BARE_TIME_24H.search(text)
+    if m:
+        return f"{int(m.group(1)):02d}:{int(m.group(2)):02d}"
+    return None
+
+
+def _find_event_by_time(events: list[EventData], time_str: str) -> EventData | None:
+    for ev in events:
+        if ev.time == time_str:
+            return ev
+    return None
 
 # Session history queries — "what did I schedule?", "what have I added this session?"
 # Only matched when there is NO date qualifier in the text (date-qualified queries
@@ -580,6 +613,10 @@ async def handle_delete(cmd: ParsedCommand, gcal: GoogleCalendar, ctx: SessionCo
 
     # Also search upcoming events if not found on that date
     event = _find_event_by_title(events, cmd.activity)
+    if not event:
+        ref_time = _extract_bare_time(cmd.activity) or _extract_bare_time(cmd.raw or "")
+        if ref_time:
+            event = _find_event_by_time(events, ref_time)
     if not event and not cmd.dates:
         with console.status("Searching upcoming events..."):
             events = await gcal.list_events()
@@ -623,6 +660,10 @@ async def handle_update(cmd: ParsedCommand, gcal: GoogleCalendar, ctx: SessionCo
         events = await gcal.list_events()
 
     event = _find_event_by_title(events, cmd.activity)
+    if not event:
+        ref_time = _extract_bare_time(cmd.activity) or _extract_bare_time(cmd.raw or "")
+        if ref_time:
+            event = _find_event_by_time(events, ref_time)
     if not event:
         display.print_error(f"No event matching '{cmd.activity}' found.")
         return

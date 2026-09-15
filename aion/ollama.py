@@ -8,7 +8,7 @@ from datetime import date as date_cls, timedelta
 import httpx
 
 from aion.config import get_config, get_now
-from aion.intent import ParsedCommand, _extract_time
+from aion.intent import ParsedCommand, _extract_duration, _extract_time, _extract_time_pref
 
 
 def _clean(val: object) -> object:
@@ -60,9 +60,13 @@ def _build_parsed_command(data: dict, user_input: str) -> ParsedCommand:
     time_val     = _clean(data.get("time"))
     time_pref    = _clean(data.get("time_pref"))
 
-    # Time fallback — if Ollama returned null, try regex on the raw input (handles "at 6" etc.)
+    # Time/time_pref fallback — if Ollama returned null, try regex on the raw
+    # input (handles "at 6" etc.). Small models are especially unreliable at
+    # numeric fields like duration, so it gets the same treatment below.
     if time_val is None:
         time_val = _extract_time(user_input)
+    if time_pref is None:
+        time_pref = _extract_time_pref(user_input)
 
     # Resolve dates — prefer our date_parser for relative expressions (today/tomorrow/weekday names)
     # so the LLM never does date arithmetic (small models get it wrong).
@@ -103,6 +107,8 @@ def _build_parsed_command(data: dict, user_input: str) -> ParsedCommand:
             duration = int(duration)
         except (ValueError, TypeError):
             duration = None
+    if duration is None:
+        duration = _extract_duration(user_input)
 
     return ParsedCommand(
         intent=intent,
