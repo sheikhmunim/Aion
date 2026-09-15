@@ -26,7 +26,10 @@ class ScheduleSolver:
         if blocked:
             target_date = request.get("date")
             program += self.model.generate_preference_constraints(blocked, target_date)
-        ctl = clingo.Control([f"--models={max_solutions}", "--opt-mode=optN"])
+        # --warn=no-atom-undefined: `busy/3` legitimately has zero facts when the
+        # calendar has no events yet — clingo's "atom does not occur in any rule
+        # head" info is a false alarm in that case, not a modeling bug.
+        ctl = clingo.Control([f"--models={max_solutions}", "--opt-mode=optN", "--warn=no-atom-undefined"])
         ctl.add("base", [], program)
 
         try:
@@ -37,6 +40,11 @@ class ScheduleSolver:
         solutions: list[list[dict]] = []
 
         def on_model(model):
+            # optN enumerates every improving model found during branch-and-bound,
+            # not just the truly optimal ones — only keep models whose optimality
+            # has actually been proven, or "best slot" picks can be stale/non-optimal.
+            if not model.optimality_proven:
+                return
             solution = []
             for atom in model.symbols(shown=True):
                 if atom.name == "schedule":

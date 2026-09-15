@@ -6,7 +6,7 @@ from datetime import datetime
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Confirm
+from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from aion.google_cal import EventData
@@ -39,6 +39,16 @@ def print_status(gcal_ok: bool, ollama_ok: bool, ollama_model: str = "") -> None
         console.print("  Ollama: [yellow]Not running[/] (type [bold]setup[/] to enable smart commands)")
     console.print(f"  Timezone: [bold]{tz}[/]")
     console.print()
+
+
+def print_greeting() -> None:
+    console.print("  Hey! I'm Aion — your calendar assistant. Here's what I can do:")
+    console.print('    • "schedule gym tomorrow morning" — add an event')
+    console.print('    • "what\'s on today?" — list events')
+    console.print('    • "when am I free this week?" — find open slots')
+    console.print('    • "move gym to 3pm" — reschedule')
+    console.print('    • "cancel gym" — delete an event')
+    console.print("  Type [bold]help[/] for the full list, or just tell me what you need.")
 
 
 def print_help() -> None:
@@ -90,7 +100,16 @@ def print_free_slots(slots: list[dict], label: str = "") -> None:
         console.print("  No free slots found.")
         return
     console.print(f"\n  [bold]Free slots — {label}[/]" if label else "\n  [bold]Free slots[/]")
+    multi_day = len({s.get("date") for s in slots}) > 1
+    current_date = None
     for s in slots:
+        if multi_day and s.get("date") != current_date:
+            current_date = s.get("date")
+            try:
+                day_label = datetime.strptime(current_date, "%Y-%m-%d").strftime("%A, %b %d")
+            except (ValueError, TypeError):
+                day_label = current_date or ""
+            console.print(f"  [bold cyan]{day_label}[/]")
         console.print(f"  [green]\u2022[/] {s['start']} — {s['end']} ({s['duration_mins']} min)")
     console.print()
 
@@ -119,6 +138,24 @@ def print_info(msg: str) -> None:
 
 def confirm(message: str) -> bool:
     return Confirm.ask(f"  {message}")
+
+
+def confirm_or_edit(message: str) -> str:
+    """Ask yes/no, but also accept free-form text as a change request.
+
+    Returns "yes", "no", or the raw text the user typed (e.g. "make it 2 hours",
+    "evening instead") when it's neither — callers interpret that as an edit.
+    """
+    while True:
+        resp = Prompt.ask(f"  {message} [y/n, or tell me what to change]").strip()
+        if not resp:
+            continue
+        low = resp.lower()
+        if low in ("y", "yes"):
+            return "yes"
+        if low in ("n", "no"):
+            return "no"
+        return resp
 
 
 def print_preferences(prefs: dict) -> None:

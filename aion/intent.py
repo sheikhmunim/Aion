@@ -44,7 +44,7 @@ _INTENT_PATTERNS: list[tuple[str, re.Pattern, int]] = [
     ("SCHEDULE", re.compile(
         r"\b(?:schedule|add|create|book|set\s+up|plan)\b", re.I), 6),
     ("LIST", re.compile(
-        r"\b(?:list|show|what'?s\s+on|events|calendar|plans|agenda|what\s+(?:do\s+)?i\s+have|check\s+(?:my\s+)?(?:calendar|events|schedule)|is\s+there\s+anything|anything\s+(?:on|today|tomorrow)|do\s+i\s+have|what\s+(?:event|meeting)|have\s+i\s+got|what'?s\s+(?:on\s+)?(?:my\s+)?(?:today|tomorrow|schedule)|what\s+(?:about\s+|(?:is\s+)?(?:there\s+|happening\s+)?(?:on\s+|in\s+|for\s+)?)?(?:today|tomorrow|(?:this|next)\s+week|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)))\b", re.I), 5),
+        r"\b(?:list|show|find\s+(?:my\s+)?(?:meetings?|events?|schedule|agenda|plans?)|what'?s\s+on|events|calendar|plans|agenda|what\s+(?:do\s+)?i\s+have|check\s+(?:my\s+)?(?:calendar|events|schedule)|is\s+there\s+anything|anything\s+(?:on|today|tomorrow)|do\s+i\s+have|what\s+(?:event|meeting)|have\s+i\s+got|what'?s\s+(?:on\s+)?(?:my\s+)?(?:today|tomorrow|schedule)|what\s+(?:about\s+|(?:is\s+)?(?:there\s+|happening\s+)?(?:on\s+|in\s+|for\s+)?)?(?:today|tomorrow|(?:this|next)\s+week|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)))\b", re.I), 5),
 ]
 
 _TIME_12H = re.compile(r"\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", re.I)
@@ -214,17 +214,22 @@ def regex_classify(user_input: str) -> ParsedCommand:
 
 
 async def classify(user_input: str, events: list[dict] | None = None) -> ParsedCommand:
-    """Classify intent — Ollama when available, regex as offline fallback."""
+    """Classify intent — Ollama when available, regex as offline fallback.
+
+    Regex also acts as a rescue net when Ollama runs but comes back UNKNOWN —
+    small local models miss plenty of phrasing regex already covers.
+    """
     from aion.ollama import ollama_available, ollama_classify
     from aion.config import get_config
 
     if ollama_available() and get_config().get("ollama_enabled", True):
         try:
-            return await ollama_classify(user_input, events)
+            result = await ollama_classify(user_input, events)
+            if result.intent != "UNKNOWN":
+                return result
         except Exception:
             pass
 
-    # Ollama not available — offline regex fallback
     return regex_classify(user_input)
 
 
@@ -283,7 +288,14 @@ async def classify_all(text: str, events: list[dict] | None = None) -> list[Pars
 
     if ollama_available() and get_config().get("ollama_enabled", True):
         try:
-            return await ollama_classify_multi(text, events)
+            results = await ollama_classify_multi(text, events)
+            # Small models sometimes split a single clause into several commands
+            # with no textual evidence of that (no "and/then/also/..."). Trust a
+            # multi-command result only when the input actually looks like one.
+            if len(results) > 1 and not _SPLIT_PAT.search(text):
+                results = results[:1]
+            if results and results[0].intent != "UNKNOWN":
+                return results
         except Exception:
             pass
 

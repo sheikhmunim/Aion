@@ -45,6 +45,18 @@ _SESSION_HISTORY_RE = re.compile(
     re.I,
 )
 
+# Plain greetings with nothing else in the message — anchored so "hey, schedule
+# gym tomorrow" still falls through to normal command classification.
+_GREETING_RE = re.compile(
+    r"^(?:"
+    r"(?:hey|hi|hello|hiya|howdy|yo|sup)(?:\s+there)?"
+    r"|good\s+(?:morning|afternoon|evening)"
+    r"|what'?s\s+up|what\s+is\s+up"
+    r"|how'?s\s+it\s+going|how\s+are\s+you"
+    r")[\s!.,?]*$",
+    re.I,
+)
+
 # Pronouns / anaphoric references meaning "the last event I mentioned"
 _ANAPHORA_RE = re.compile(
     r"^(?:that|it|this|the\s+last\s+(?:one|event)?|last\s+(?:one|event)?|the\s+one)\s*$",
@@ -158,6 +170,43 @@ def _check_conflict(events: list[EventData], date: str, time: str, duration: int
     return conflicts
 
 
+_TIME_PREF_DEFAULTS = {"morning": "09:00", "afternoon": "14:00", "evening": "18:00"}
+
+
+def _parse_edit_delta(text: str) -> dict:
+    """Parse a free-form change request ("make it 2 hours", "evening instead",
+    "actually 5pm", "move to friday") into overrides for an in-progress schedule.
+
+    Returns a dict with any of: duration, time, time_pref, date, date_label.
+    Empty dict means nothing recognizable was said.
+    """
+    from aion.date_parser import parse_date_from_query
+    from aion.intent import _extract_duration, _extract_time, _extract_time_pref
+
+    overrides: dict = {}
+
+    duration = _extract_duration(text)
+    if duration:
+        overrides["duration"] = duration
+
+    time_pref = _extract_time_pref(text)
+    if time_pref:
+        overrides["time_pref"] = time_pref
+
+    # _extract_time only matches an explicit "at <time>" cue, so bare numbers
+    # like "2 hours" are never misread as a time.
+    time_val = _extract_time(text)
+    if time_val:
+        overrides["time"] = time_val
+
+    date_info = parse_date_from_query(text)
+    if date_info.get("dates"):
+        overrides["date"] = date_info["dates"][0]
+        overrides["date_label"] = date_info.get("label", "")
+
+    return overrides
+
+
 async def handle_schedule(
     cmd: ParsedCommand,
     gcal: GoogleCalendar,
@@ -221,12 +270,49 @@ async def handle_schedule(
                 return
             # choice == "1": fall through to solver below
         else:
+            date_display = cmd.date_label or date
             if not auto_confirm:
-                date_display = cmd.date_label or date
-                if not display.confirm(
-                    f"Schedule '{title}' on {date_display} at {cmd.time} for {duration} min?"
-                ):
-                    return  # user declined
+                while True:
+                    resp = display.confirm_or_edit(
+                        f"Schedule '{title}' on {date_display} at {cmd.time} for {duration} min?"
+                    )
+                    if resp == "yes":
+                        break
+                    if resp == "no":
+                        return  # user declined
+
+                    overrides = _parse_edit_delta(resp)
+                    if not overrides:
+                        display.print_info(
+                            "Didn't catch a change there — try things like "
+                            '"make it 2 hours", "5pm instead", or "move to friday".'
+                        )
+                        continue
+
+                    if "duration" in overrides:
+                        duration = overrides["duration"]
+                    if overrides.get("date") and overrides["date"] != date:
+                        date = overrides["date"]
+                        cmd.date_label = overrides.get("date_label", "")
+                        with console.status("Fetching calendar..."):
+                            events = await gcal.list_events(date)
+                    if "time" in overrides:
+                        cmd.time = overrides["time"]
+                    elif "time_pref" in overrides:
+                        cmd.time = _TIME_PREF_DEFAULTS[overrides["time_pref"]]
+                    date_display = cmd.date_label or date
+
+                    conflicts = _check_conflict(events, date, cmd.time, duration)
+                    pref_blocks = _check_preference_block(date, cmd.time, duration)
+                    if conflicts:
+                        display.print_error(f"Heads up — '{cmd.time}' overlaps with:")
+                        for c in conflicts:
+                            console.print(f"    - {c.time} — {c.title} ({c.duration} min)")
+                    if pref_blocks:
+                        display.print_error(f"Heads up — '{cmd.time}' falls in a blocked time slot:")
+                        for b in pref_blocks:
+                            console.print(f"    - {b.get('label', 'Blocked')} ({b['start']} - {b['end']})")
+                    # loop back and show the updated proposal
             with console.status("Creating event..."):
                 ev = await gcal.create_event(title, date, cmd.time, duration)
             display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time}")
@@ -271,13 +357,81 @@ async def handle_schedule(
             best = all_slots[slot_idx]
             date_display = cmd.date_label or best["date"]
 
-            if display.confirm(f"Schedule '{title}' on {date_display} at {best['time']} for {duration} min?"):
+            resp = display.confirm_or_edit(
+                f"Schedule '{title}' on {date_display} at {best['time']} for {duration} min?"
+            )
+            if resp == "yes":
                 with console.status("Creating event..."):
                     ev = await gcal.create_event(title, best["date"], best["time"], duration)
                 display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time}")
                 if ctx:
                     ctx.record_created(ev)
                 return
+
+            if resp != "no":
+                # Free-form change request instead of yes/no
+                overrides = _parse_edit_delta(resp)
+                if not overrides:
+                    display.print_info(
+                        "Didn't catch a change there — try things like "
+                        '"make it 2 hours", "5pm instead", or "move to friday".'
+                    )
+                    continue
+
+                if overrides.get("date") and overrides["date"] != date:
+                    date = overrides["date"]
+                    cmd.date_label = overrides.get("date_label", "")
+                    request["date"] = date
+                    with console.status("Fetching calendar..."):
+                        events = await gcal.list_events(date)
+
+                if "duration" in overrides:
+                    duration = overrides["duration"]
+                    request["duration"] = duration
+
+                explicit_time = overrides.get("time")
+                if explicit_time:
+                    conflicts = _check_conflict(events, date, explicit_time, duration)
+                    pref_blocks = _check_preference_block(date, explicit_time, duration)
+                    if conflicts:
+                        display.print_error(f"Conflict at {explicit_time} with:")
+                        for c in conflicts:
+                            console.print(f"    - {c.time} — {c.title} ({c.duration} min)")
+                        if not display.confirm("Schedule anyway (overlap)?"):
+                            continue
+                    if pref_blocks:
+                        display.print_error(f"'{explicit_time}' falls in a blocked time slot:")
+                        for b in pref_blocks:
+                            console.print(f"    - {b.get('label', 'Blocked')} ({b['start']} - {b['end']})")
+                        if not display.confirm("Schedule anyway (override preference)?"):
+                            continue
+                    with console.status("Creating event..."):
+                        ev = await gcal.create_event(title, date, explicit_time, duration)
+                    display.print_success(f"Created! '{ev.title}' on {ev.date} at {ev.time}")
+                    if ctx:
+                        ctx.record_created(ev)
+                    return
+
+                if "time_pref" in overrides:
+                    pref = overrides["time_pref"]
+                    request["prefer_morning"] = pref == "morning"
+                    request["prefer_afternoon"] = pref == "afternoon"
+                    request["prefer_evening"] = pref == "evening"
+
+                new_solutions = solver.find_available_slots([e.to_dict() for e in events], request)
+                seen_times.clear()
+                all_slots.clear()
+                if new_solutions and not (isinstance(new_solutions[0], dict) and "error" in new_solutions[0]):
+                    for group in new_solutions:
+                        for s in (group if isinstance(group, list) else [group]):
+                            key = f"{s.get('date')}_{s['time']}"
+                            if key not in seen_times:
+                                seen_times.add(key)
+                                all_slots.append(s)
+                if not all_slots:
+                    display.print_error("No slots found for that change.")
+                slot_idx = 0
+                continue
 
             slot_idx += 1
 
@@ -495,13 +649,23 @@ async def handle_update(cmd: ParsedCommand, gcal: GoogleCalendar, ctx: SessionCo
 
 
 async def handle_find_free(cmd: ParsedCommand, gcal: GoogleCalendar, solver: ScheduleSolver) -> None:
-    date = cmd.dates[0] if cmd.dates else get_now().strftime("%Y-%m-%d")
-    label = cmd.date_label or date
+    dates = cmd.dates or [get_now().strftime("%Y-%m-%d")]
+    label = cmd.date_label or dates[0]
 
     with console.status("Fetching events..."):
-        events = await gcal.list_events(date)
+        if len(dates) > 1:
+            events = await gcal.list_events_range(dates[0], dates[-1])
+        else:
+            events = await gcal.list_events(dates[0])
 
-    slots = solver.find_free_slots([e.to_dict() for e in events], date)
+    events_by_date: dict[str, list[dict]] = {}
+    for e in events:
+        events_by_date.setdefault(e.date, []).append(e.to_dict())
+
+    slots: list[dict] = []
+    for date in dates:
+        slots.extend(solver.find_free_slots(events_by_date.get(date, []), date))
+
     display.print_free_slots(slots, label)
 
 
@@ -933,6 +1097,10 @@ async def handle_input(user_input: str, gcal: GoogleCalendar | None, solver: Sch
         display.print_help()
         return True
 
+    if _GREETING_RE.match(text):
+        display.print_greeting()
+        return True
+
     if text.lower() in ("preferences", "prefs", "settings"):
         handle_preferences()
         return True
@@ -1054,7 +1222,12 @@ async def async_main() -> None:
         console.print()
         if RichConfirm.ask("  Enable smart command understanding? (auto-installs Ollama + ~2GB model download)", default=True):
             from aion.setup import setup
-            if setup():
+            try:
+                setup_ok = setup()
+            except Exception as e:
+                display.print_error(f"Setup failed unexpectedly: {e}")
+                setup_ok = False
+            if setup_ok:
                 reset_status()
                 ollama_ok = ollama_available()
                 ollama_model = get_config().get("ollama_model", "")

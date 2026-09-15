@@ -23,6 +23,7 @@ dependencies = [
     "clingo>=5.6.0",
     "httpx>=0.25.0",
     "rich>=13.0.0",
+    "tzdata>=2024.1; sys_platform == 'win32'",
 ]
 
 [project.urls]

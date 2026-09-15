@@ -184,7 +184,10 @@ Respond ONLY with a valid JSON array (no markdown, no explanation):
     if isinstance(parsed, dict):
         parsed = [parsed]
 
-    return [_build_parsed_command(item, user_input) for item in parsed]
+    results = [_build_parsed_command(item, user_input) for item in parsed]
+    # Guard: casual input ("hey", "what's up") legitimately yields no commands —
+    # always return at least one UNKNOWN so callers can index `[0]` safely.
+    return results or [_build_parsed_command({}, user_input)]
 
 
 async def ollama_classify(user_input: str, events: list[dict] | None = None) -> ParsedCommand:

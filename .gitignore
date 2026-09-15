@@ -87,3 +87,6 @@ id.txt
 
 # Claude Code
 .claude/
+
+# Ollama installer (downloaded by setup fallback, ~800MB)
+OllamaSetup.exe
